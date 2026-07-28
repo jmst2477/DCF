@@ -85,9 +85,10 @@ details.paste[open] summary::before{transform:rotate(90deg);}
     <details class="paste">
       <summary>시킹알파 EPS 컨센서스 붙여넣기 (선택)</summary>
       <p class="note" style="margin-top:10px">시킹알파의 Earnings Estimates 표를 마우스로 드래그해 복사한 뒤 아래에 붙여넣고 "EPS 적용"을 누르세요.
-      연도별 EPS를 자동으로 인식해 <strong>순이익(EPS × 발행주식수)</strong>과 <strong>법인세</strong>를 5개년에 채웁니다.
+      제목 줄이 섞여 있거나 연도와 숫자가 다른 줄로 나뉘어도 자동으로 인식합니다.
+      연도별 EPS로 <strong>순이익(EPS × 발행주식수)</strong>과 <strong>법인세</strong>를 5개년에 채웁니다.
       먼저 "자동 입력"으로 발행주식수를 채운 뒤 사용하는 것이 정확합니다.</p>
-      <textarea id="epsPaste" placeholder="예)&#10;Aug 2026&#9;73.44&#9;785.94%&#9;12.26&#9;67.39&#9;80.16&#9;35&#10;Aug 2027&#9;153.74&#9;109.33%&#9;5.86&#9;89.53&#9;221.27&#9;37"></textarea>
+      <textarea id="epsPaste" placeholder="예)&#10;Fiscal Period Ending&#9;EPS Estimate&#9;YoY Growth ...&#10;Aug 2026&#10;73.44&#9;785.94%&#9;12.26&#9;67.39&#9;80.16&#9;35&#10;Aug 2027&#10;153.74&#9;109.33%&#9;5.86&#9;89.53&#9;221.27&#9;37"></textarea>
       <div class="paste-actions">
         <button class="secondary" id="epsApplyBtn">EPS 적용</button>
         <div id="epsMsg"></div>
@@ -323,7 +324,51 @@ async function fetchData() {
 $("fetchBtn").addEventListener("click", fetchData);
 $("ticker").addEventListener("keydown", e => { if (e.key === "Enter") fetchData(); });
 
-/* ── 시킹알파 EPS 붙여넣기 파싱 ── */
+/* ── 시킹알파 EPS 붙여넣기 파싱 (토큰 흐름 방식) ──
+   연도('Aug 2026', 'FY2026')를 만나면 그다음에 나오는 첫 순수 숫자를 EPS로 인식.
+   연도와 숫자가 같은 줄이든 다른 줄이든, 제목 줄이 섞여 있든 모두 처리됩니다. */
+function parseEPS(text) {
+  const MONTHS = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
+  const tokens = text.split(/[\t\r\n\s]+/).filter(Boolean);
+  const found = [];
+  let pendingYear = null;
+  for (let k = 0; k < tokens.length; k++) {
+    const tk = tokens[k];
+    const yr = tk.replace(/^FY/i, "");
+    if (/^(19|20)\d{2}$/.test(yr) && ((k > 0 && MONTHS.test(tokens[k-1])) || /^FY/i.test(tk))) {
+      pendingYear = parseInt(yr);
+      continue;
+    }
+    if (pendingYear !== null) {
+      const clean = tk.replace(/,/g, "");
+      if (/%|x$/i.test(clean)) continue;
+      const n = parseFloat(clean);
+      if (isFinite(n)) {
+        if (!found.some(f => f.year === pendingYear)) found.push({ year: pendingYear, eps: n });
+        pendingYear = null;
+      }
+    }
+  }
+  // 월 이름 없이 '2026 73.44' 형식으로 붙여넣은 경우를 위한 예비 인식
+  if (found.length === 0) {
+    let py = null;
+    for (const tk of tokens) {
+      if (/^(19|20)\d{2}$/.test(tk)) { py = parseInt(tk); continue; }
+      if (py !== null) {
+        const clean = tk.replace(/,/g, "");
+        if (/%|x$/i.test(clean)) continue;
+        const n = parseFloat(clean);
+        if (isFinite(n)) {
+          if (!found.some(f => f.year === py)) found.push({ year: py, eps: n });
+          py = null;
+        }
+      }
+    }
+  }
+  found.sort((a,b) => a.year - b.year);
+  return found;
+}
+
 function applyEPS() {
   const text = $("epsPaste").value;
   const msg = $("epsMsg");
@@ -331,49 +376,23 @@ function applyEPS() {
   if (!text.trim()) { msg.className="err"; msg.textContent="붙여넣은 내용이 없습니다."; return; }
   if (!shares || shares <= 0) { msg.className="err"; msg.textContent="발행주식수가 없습니다. 먼저 '자동 입력'을 실행하거나 발행주식수를 입력해 주세요."; return; }
 
-  const MONTHS = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
-  const found = []; // { year, eps }
-  for (const line of text.split(/\r?\n/)) {
-    const tokens = line.trim().split(/[\t\s]+/).filter(Boolean);
-    if (tokens.length < 2) continue;
-    // 연도 위치 찾기: "Aug 2026" 또는 "FY2026" 또는 "2026" 형태
-    let year = null, yIdx = -1;
-    for (let k = 0; k < tokens.length; k++) {
-      const tk = tokens[k].replace(/^FY/i, "");
-      if (/^(19|20)\d{2}$/.test(tk)) {
-        // 월 이름 바로 뒤거나, 행 앞부분에 있는 연도만 인정
-        if ((k > 0 && MONTHS.test(tokens[k-1])) || k <= 1) { year = parseInt(tk); yIdx = k; break; }
-      }
-    }
-    if (year === null) continue;
-    // 연도 다음에 나오는 첫 순수 숫자(%·x 제외)를 EPS로 인식
-    for (let k = yIdx + 1; k < tokens.length; k++) {
-      const tk = tokens[k].replace(/,/g, "");
-      if (/%|x$/i.test(tk)) continue;
-      const n = parseFloat(tk);
-      if (isFinite(n)) { found.push({ year, eps: n }); break; }
-    }
-  }
-
+  const found = parseEPS(text);
   if (found.length === 0) {
     msg.className="err";
-    msg.textContent="EPS를 인식하지 못했습니다. 표의 행(예: Aug 2026  73.44 ...)이 포함되도록 복사했는지 확인해 주세요.";
+    msg.textContent="EPS를 인식하지 못했습니다. 연도(Aug 2026 등)와 EPS 숫자가 포함되도록 표를 복사했는지 확인해 주세요.";
     return;
   }
 
-  // 연도순 정렬 후 앞 5개년 사용
-  found.sort((a,b) => a.year - b.year);
   const use = found.slice(0, YEARS);
   const t = val("taxRate")/100;
 
   for (let i = 0; i < YEARS; i++) {
     if (i < use.length) {
-      const ni = +(use[i].eps * shares).toFixed(1);           // 순이익 = EPS × 주식수
+      const ni = +(use[i].eps * shares).toFixed(1);             // 순이익 = EPS × 주식수
       const tax = t < 1 ? +((ni * t) / (1 - t)).toFixed(1) : 0; // 법인세 = 세전이익 − 순이익
       $(`ni_${i}`).value = ni;
       $(`tax_${i}`).value = tax;
     } else {
-      // 붙여넣은 연도가 5개 미만이면 마지막 EPS를 유지
       $(`ni_${i}`).value = $(`ni_${use.length-1}`).value;
       $(`tax_${i}`).value = $(`tax_${use.length-1}`).value;
     }
@@ -382,7 +401,7 @@ function applyEPS() {
     i < use.length ? use[i].year : use[use.length-1].year + (i - use.length + 1)));
 
   msg.className="ok";
-  msg.textContent = `✓ ${use.length}개 연도 적용: ` +
+  msg.textContent = `✓ ${found.length}개 연도 인식, 앞 ${use.length}개년 적용: ` +
     use.map(u => `${u.year} EPS $${u.eps}`).join(", ") +
     ` → 순이익·법인세 교체 완료 (주식수 ${fmt(shares)}백만 주, 세율 ${fmt(t*100,1)}% 기준). CAPEX·감가상각은 직접 조정해 주세요.`;
   recalc();
