@@ -2,7 +2,7 @@
 // 1순위: 야후 파이낸스(비공식) — 전 종목, 횟수 제한 없음, API 키 불필요
 // 2순위: FMP (환경변수 FMP_API_KEY 가 있을 때)
 // 3순위: Alpha Vantage (환경변수 ALPHAVANTAGE_API_KEY 가 있을 때)
-// ※ 야후는 공식 API가 아니므로 언젠가 막히면 자동으로 2·3순위로 넘어갑니다.
+// ※ 재무제표가 비어 있으면 실패로 간주하고 다음 데이터원으로 자동 전환합니다.
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -38,7 +38,7 @@ async function fromYahoo(ticker) {
   const crumb = (await r2.text()).trim();
   if (!crumb || crumb.length > 30 || crumb.includes("<")) throw new Error("야후 crumb 발급 실패");
 
-  // 3) 기업 개요 (이름·현재가·베타·주식수)
+  // 3) 기업 개요 (이름·현재가·베타·주식수·시가총액)
   const qs = await getJson(
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
       ticker
@@ -74,8 +74,10 @@ async function fromYahoo(ticker) {
     )}?symbol=${encodeURIComponent(ticker)}&type=${types}&period1=${now - 3 * 365 * 86400}&period2=${now}&crumb=${encodeURIComponent(crumb)}`,
     H
   );
+  const tserr = ts.finance && ts.finance.error;
+  if (tserr) throw new Error("야후 재무제표: " + (tserr.description || tserr.code));
   const results = (ts.timeseries && ts.timeseries.result) || [];
-  const latest = {}; // { annualNetIncome: {value, date}, ... }
+  const latest = {};
   for (const item of results) {
     const type = item.meta && item.meta.type && item.meta.type[0];
     if (!type || !Array.isArray(item[type])) continue;
@@ -88,17 +90,27 @@ async function fromYahoo(ticker) {
     }
   }
   const g = (t) => (latest[t] ? latest[t].value : 0);
+
+  // ★ 재무제표가 비어 있으면 실패 처리 → FMP/Alpha Vantage로 자동 전환
   const netIncome = g("annualNetIncome");
-  if (!netIncome && !raw(price.regularMarketPrice)) throw new Error("야후에서 재무데이터를 찾지 못함");
+  if (!netIncome) throw new Error("야후에서 재무제표를 받지 못함(주가만 수신)");
+
+  const curPrice = raw(price.regularMarketPrice) || 0;
+  // 주식수: 통계값이 없으면 시가총액 ÷ 주가로 계산
+  let sharesMM = M(raw(stats.sharesOutstanding) || 0);
+  if (!sharesMM && curPrice > 0 && raw(price.marketCap)) {
+    sharesMM = M(raw(price.marketCap) / curPrice);
+  }
+  if (!sharesMM) throw new Error("야후에서 발행주식수를 받지 못함");
 
   const taxe = g("annualTaxProvision");
   const ibt = g("annualPretaxIncome");
   return {
     source: "Yahoo Finance",
     companyName: price.longName || price.shortName || ticker,
-    currentPrice: raw(price.regularMarketPrice) || 0,
+    currentPrice: curPrice,
     beta: raw(stats.beta) || raw(sdet.beta) || 1.0,
-    sharesOutstandingMillions: M(raw(stats.sharesOutstanding) || 0),
+    sharesOutstandingMillions: sharesMM,
     netIncome: M(netIncome),
     taxExpense: M(taxe),
     interestExpense: M(g("annualInterestExpense")),
@@ -130,7 +142,7 @@ async function fromFMP(ticker, key) {
   const i = (Array.isArray(income) && income[0]) || {};
   const b = (Array.isArray(balance) && balance[0]) || {};
   const c = (Array.isArray(cashflow) && cashflow[0]) || {};
-  if (!i.netIncome && !p.companyName) throw new Error("FMP에 데이터 없음");
+  if (!i.netIncome) throw new Error("FMP에 재무제표 없음");
   return {
     source: "FMP",
     companyName: p.companyName || ticker,
@@ -171,7 +183,7 @@ async function fromAlphaVantage(ticker, key) {
   const b = (balance.annualReports && balance.annualReports[0]) || {};
   const c = (cashflow.annualReports && cashflow.annualReports[0]) || {};
   const q = (quote && quote["Global Quote"]) || {};
-  if (!i.netIncome && !overview.Name) throw new Error("Alpha Vantage에 데이터 없음");
+  if (!i.netIncome) throw new Error("Alpha Vantage에 재무제표 없음");
   const num = (v) => {
     const n = parseFloat(v);
     return isFinite(n) ? n : 0;
@@ -206,7 +218,6 @@ export default async function handler(req, res) {
 
   const errors = [];
 
-  // 1순위: 야후
   try {
     const data = await fromYahoo(ticker);
     return res.status(200).json(data);
@@ -214,7 +225,6 @@ export default async function handler(req, res) {
     errors.push("[야후] " + e.message.slice(0, 120));
   }
 
-  // 2순위: FMP
   if (process.env.FMP_API_KEY) {
     try {
       const data = await fromFMP(ticker, process.env.FMP_API_KEY);
@@ -224,7 +234,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // 3순위: Alpha Vantage
   if (process.env.ALPHAVANTAGE_API_KEY) {
     try {
       const data = await fromAlphaVantage(ticker, process.env.ALPHAVANTAGE_API_KEY);
