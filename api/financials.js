@@ -2,7 +2,6 @@
 // 1순위: 야후 파이낸스(비공식) — 전 종목, 횟수 제한 없음, API 키 불필요
 // 2순위: FMP (환경변수 FMP_API_KEY 가 있을 때)
 // 3순위: Alpha Vantage (환경변수 ALPHAVANTAGE_API_KEY 가 있을 때)
-// ※ 재무제표가 비어 있으면 실패로 간주하고 다음 데이터원으로 자동 전환합니다.
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -67,6 +66,8 @@ async function fromYahoo(ticker) {
     "annualCashCashEquivalentsAndShortTermInvestments",
     "annualCashAndCashEquivalents",
     "annualTotalDebt",
+    "annualDilutedAverageShares",
+    "annualBasicAverageShares",
   ].join(",");
   const ts = await getJson(
     `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(
@@ -91,16 +92,20 @@ async function fromYahoo(ticker) {
   }
   const g = (t) => (latest[t] ? latest[t].value : 0);
 
-  // ★ 재무제표가 비어 있으면 실패 처리 → FMP/Alpha Vantage로 자동 전환
+  // 재무제표가 비어 있으면 실패 처리 → FMP/Alpha Vantage로 자동 전환
   const netIncome = g("annualNetIncome");
   if (!netIncome) throw new Error("야후에서 재무제표를 받지 못함(주가만 수신)");
 
   const curPrice = raw(price.regularMarketPrice) || 0;
-  // 주식수: 통계값이 없으면 시가총액 ÷ 주가로 계산
+
+  // ★ 발행주식수: 다섯 곳을 순서대로 확인
+  // ① 통계 모듈 ② 시가총액(price)÷주가 ③ 시가총액(summaryDetail)÷주가
+  // ④ 재무제표 희석 가중평균주식수 ⑤ 재무제표 기본 가중평균주식수
   let sharesMM = M(raw(stats.sharesOutstanding) || 0);
-  if (!sharesMM && curPrice > 0 && raw(price.marketCap)) {
-    sharesMM = M(raw(price.marketCap) / curPrice);
-  }
+  if (!sharesMM && curPrice > 0 && raw(price.marketCap)) sharesMM = M(raw(price.marketCap) / curPrice);
+  if (!sharesMM && curPrice > 0 && raw(sdet.marketCap)) sharesMM = M(raw(sdet.marketCap) / curPrice);
+  if (!sharesMM) sharesMM = M(g("annualDilutedAverageShares"));
+  if (!sharesMM) sharesMM = M(g("annualBasicAverageShares"));
   if (!sharesMM) throw new Error("야후에서 발행주식수를 받지 못함");
 
   const taxe = g("annualTaxProvision");
@@ -241,6 +246,8 @@ export default async function handler(req, res) {
     } catch (e) {
       errors.push("[Alpha Vantage] " + e.message.slice(0, 120));
     }
+  } else {
+    errors.push("[Alpha Vantage] 키 미등록 (Vercel 환경변수 ALPHAVANTAGE_API_KEY)");
   }
 
   return res.status(502).json({
