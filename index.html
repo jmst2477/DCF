@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DCF 밸류에이션 | 적정주가 계산기</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap');
+
+:root{
+  --bg:#F3F5F7; --surface:#FFFFFF; --ink:#17242F; --sub:#5B6B78;
+  --line:#DDE3E8; --green:#0B6B53; --red:#B23A2F;
+  --input-text:#1741C9; --input-bg:#FFF9DE;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans KR',sans-serif;padding:28px 16px 60px;}
+.wrap{max-width:1100px;margin:0 auto;}
+.eyebrow{font-size:12px;letter-spacing:.14em;color:var(--green);font-weight:700;}
+h1{font-size:26px;font-weight:700;margin:6px 0 4px;letter-spacing:-.02em;}
+.desc{font-size:13px;color:var(--sub);margin-bottom:22px;line-height:1.6;}
+.tag{color:var(--input-text);background:var(--input-bg);padding:1px 6px;border-radius:3px;font-weight:500;}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;box-shadow:0 1px 2px rgba(23,36,47,.04);}
+.panel h2{font-size:15px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em;}
+.searchbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;}
+#ticker{flex:1 1 220px;padding:10px 14px;font-size:15px;border:1px solid var(--line);border-radius:6px;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;}
+#fetchBtn{padding:10px 22px;font-size:14px;font-weight:700;color:#fff;background:var(--ink);border:none;border-radius:6px;cursor:pointer;}
+#fetchBtn:disabled{background:var(--sub);cursor:wait;}
+#msg{flex-basis:100%;font-size:13px;}
+#msg.err{color:var(--red);} #msg.info{color:var(--sub);font-size:12px;}
+.banner{display:none;margin-bottom:18px;gap:28px;flex-wrap:wrap;align-items:baseline;border-left:5px solid var(--sub);}
+.banner.show{display:flex;}
+.banner .lbl{font-size:12px;color:var(--sub);}
+.banner .val{font-size:18px;font-weight:700;font-family:'IBM Plex Mono',monospace;}
+.grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:18px;}
+@media(max-width:900px){.grid{grid-template-columns:1fr;}}
+table{border-collapse:collapse;width:100%;}
+th{font-size:12px;color:var(--sub);font-weight:600;text-align:right;padding:8px 10px;border-bottom:2px solid var(--ink);}
+th:first-child{text-align:left;}
+td{font-size:13px;padding:4px 6px;}
+td.lbl{white-space:nowrap;padding:6px 10px;}
+td.lbl small{display:block;font-size:10px;color:var(--sub);}
+td.num{font-family:'IBM Plex Mono',monospace;text-align:right;padding:6px 10px;}
+tr.subtotal{border-top:1px solid var(--line);background:#FAFBFC;font-weight:700;}
+tr.total{border-top:2px solid var(--ink);font-weight:700;}
+input.cell{width:96px;text-align:right;padding:5px 8px;border:1px solid var(--line);border-radius:4px;background:var(--input-bg);color:var(--input-text);font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;}
+input.cell:focus{outline:2px solid var(--input-text);outline-offset:1px;}
+input.cell.wide{width:120px;}
+.vrow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;gap:12px;font-size:13px;}
+.vrow .num{font-family:'IBM Plex Mono',monospace;font-weight:700;}
+.vrow.derived{border-top:1px dashed var(--line);color:var(--sub);}
+.result{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin-top:8px;background:var(--ink);border-radius:6px;color:#fff;font-weight:700;}
+.result .num{font-family:'IBM Plex Mono',monospace;font-size:16px;}
+.side{display:flex;flex-direction:column;gap:18px;}
+.note{font-size:12px;color:var(--sub);line-height:1.7;}
+.note strong{color:var(--ink);}
+.warn{margin-top:8px;font-size:12px;color:var(--red);display:none;}
+.tableblock{overflow-x:auto;}
+.valuation{margin-top:18px;border-top:2px solid var(--ink);padding-top:10px;max-width:440px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">EQUITY VALUATION · FCFF MODEL</div>
+    <h1>DCF 밸류에이션</h1>
+    <p class="desc">티커를 입력하면 최신 연간 재무데이터가 자동 입력됩니다. 단위: 백만 US$ ·
+      <span class="tag">파란 글씨 셀</span>은 직접 수정 가능, 검은 숫자는 자동 계산됩니다.</p>
+  </header>
+
+  <div class="panel searchbar">
+    <input id="ticker" placeholder="티커 입력 (예: AAPL, MSFT, NVDA)">
+    <button id="fetchBtn">자동 입력</button>
+    <div id="msg"></div>
+  </div>
+
+  <div class="panel banner" id="banner">
+    <div><div class="lbl">기업명</div><div class="val" id="bName" style="font-family:'IBM Plex Sans KR'">–</div></div>
+    <div><div class="lbl">현재 주가</div><div class="val" id="bPrice">–</div></div>
+    <div><div class="lbl">적정주가 (모델)</div><div class="val" id="bFair">–</div></div>
+    <div><div class="lbl">괴리율 (상승여력)</div><div class="val" id="bUpside">–</div></div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>기업잉여현금흐름(FCFF) 5개년 추정</h2>
+      <div class="tableblock">
+        <table id="fcffTable">
+          <thead><tr id="yearHead"><th>항목</th></tr></thead>
+          <tbody id="fcffBody"></tbody>
+        </table>
+      </div>
+
+      <div class="valuation">
+        <div class="vrow"><span style="font-weight:700">기업가치(EV)</span><span class="num" id="oEV">–</span></div>
+        <div class="vrow"><span>가산: 현금성자산</span><input class="cell wide" id="cash" value="0"></div>
+        <div class="vrow"><span>차감: 총차입금</span><input class="cell wide" id="debt" value="0"></div>
+        <div class="vrow"><span style="font-weight:700">자기자본가치(Equity Value)</span><span class="num" id="oEquity">–</span></div>
+        <div class="vrow"><span>가중평균 발행주식수 (백만 주)</span><input class="cell wide" id="shares" value="1000"></div>
+        <div class="result"><span>주당 자기자본가치 (적정주가)</span><span class="num" id="oFair">–</span></div>
+      </div>
+    </section>
+
+    <section class="side">
+      <div class="panel">
+        <h2>할인율(WACC) 가정</h2>
+        <div class="vrow"><span>무위험이자율 (%)</span><input class="cell" id="rf" value="4.5"></div>
+        <div class="vrow"><span>시장위험프리미엄 (%)</span><input class="cell" id="mrp" value="5.5"></div>
+        <div class="vrow"><span>무차입 베타</span><input class="cell" id="ub" value="1.16"></div>
+        <div class="vrow"><span>세율 (%)</span><input class="cell" id="taxRate" value="21"></div>
+        <div class="vrow"><span>자본구조(부채/자기자본)</span><input class="cell" id="de" value="0.06"></div>
+        <div class="vrow"><span>타인자본비용 (%)</span><input class="cell" id="kd" value="5.4"></div>
+        <div class="vrow derived"><span>주식 베타(Equity Beta)</span><span class="num" id="oBeta">–</span></div>
+        <div class="vrow derived"><span>자기자본비용(Cost of Equity)</span><span class="num" id="oKe">–</span></div>
+        <div class="vrow derived"><span>가중평균자본비용(WACC)</span><span class="num" id="oWacc">–</span></div>
+      </div>
+
+      <div class="panel">
+        <h2>영구가치 가정</h2>
+        <div class="vrow"><span>영구성장률 (%)</span><input class="cell" id="g" value="1.5"></div>
+        <div class="vrow"><span>추정 성장률 (%) <small style="color:var(--sub)">1~5년차 적용</small></span><input class="cell" id="growth" value="8"></div>
+        <div class="vrow derived"><span>영구가치(TV)</span><span class="num" id="oTV">–</span></div>
+        <div class="warn" id="gWarn">⚠ 영구성장률이 WACC보다 크거나 같으면 영구가치를 계산할 수 없습니다.</div>
+      </div>
+
+      <div class="panel note">
+        <strong>사용 안내</strong><br>
+        · 자동 입력은 최근 연간 실적(FMP 데이터)에 추정 성장률을 적용해 5개년을 채웁니다.<br>
+        · 시킹알파에서 확인한 애널리스트 추정치로 각 연도 셀을 덮어쓰면 정밀도가 올라갑니다.<br>
+        · 성장률을 바꾼 뒤 "자동 입력"을 다시 누르면 새 성장률로 다시 추정합니다.<br>
+        · 본 도구는 교육·참고용이며 투자 판단의 근거가 아닙니다.
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const YEARS = 5;
+const startYear = new Date().getFullYear();
+const ROWS = [
+  { id:"ni",    label:"당기순이익" },
+  { id:"tax",   label:"법인세" },
+  { id:"int",   label:"이자비용" },
+  { id:"dna",   label:"감가상각·무형자산상각비" },
+  { id:"EBITDA",label:"EBITDA", computed:true, cls:"subtotal" },
+  { id:"nwc",   label:"순운전자본(NWC) 변동", note:"현금흐름 영향, 증가 시 음수" },
+  { id:"capex", label:"자본적지출(CAPEX)", note:"양수로 입력, 자동 차감" },
+  { id:"FCFF",  label:"기업잉여현금흐름(FCFF)", computed:true, cls:"total" },
+  { id:"TV",    label:"영구가치(Terminal Value)", computed:true, tvRow:true },
+];
+
+let meta = null; // { companyName, currentPrice }
+
+/* ── 표 생성 ── */
+const head = document.getElementById("yearHead");
+for (let y = 0; y < YEARS; y++) {
+  const th = document.createElement("th");
+  th.textContent = (startYear + y) + "(E)";
+  head.appendChild(th);
+}
+const body = document.getElementById("fcffBody");
+ROWS.forEach(r => {
+  const tr = document.createElement("tr");
+  if (r.cls) tr.className = r.cls;
+  const td = document.createElement("td");
+  td.className = "lbl";
+  td.innerHTML = r.label + (r.note ? `<small>${r.note}</small>` : "");
+  tr.appendChild(td);
+  for (let y = 0; y < YEARS; y++) {
+    const cell = document.createElement("td");
+    if (r.computed) {
+      cell.className = "num";
+      cell.id = `o_${r.id}_${y}`;
+      if (r.tvRow) cell.style.color = "var(--green)";
+    } else {
+      cell.style.textAlign = "right";
+      const inp = document.createElement("input");
+      inp.className = "cell";
+      inp.id = `${r.id}_${y}`;
+      inp.value = "0";
+      cell.appendChild(inp);
+    }
+    tr.appendChild(cell);
+  }
+  body.appendChild(tr);
+});
+
+/* ── 유틸 ── */
+const $ = id => document.getElementById(id);
+const val = id => { const v = parseFloat(String($(id).value).replace(/,/g,"")); return isNaN(v) ? 0 : v; };
+const fmt = (n, d=0) => (n===null||n===undefined||isNaN(n)||!isFinite(n)) ? "–"
+  : n.toLocaleString("ko-KR",{maximumFractionDigits:d,minimumFractionDigits:d});
+
+/* ── 계산 (엑셀 수식 재현) ── */
+function recalc() {
+  const rf = val("rf")/100, mrp = val("mrp")/100, ub = val("ub"),
+        taxRate = val("taxRate")/100, de = val("de"), kd = val("kd")/100,
+        g = val("g")/100;
+
+  const equityBeta = ub * (1 + (1 - taxRate) * de);
+  const ke = rf + equityBeta * mrp;
+  const wE = 1/(1+de), wD = de/(1+de);
+  const wacc = wE*ke + wD*kd*(1-taxRate);
+
+  const fcff = [];
+  for (let y = 0; y < YEARS; y++) {
+    const ni = val(`ni_${y}`), tax = val(`tax_${y}`), it = val(`int_${y}`),
+          dna = val(`dna_${y}`), nwc = val(`nwc_${y}`), capex = val(`capex_${y}`);
+    const ebitda = ni + tax + it + dna;
+    const f = ebitda + nwc - it - tax - capex;
+    fcff.push(f);
+    $(`o_EBITDA_${y}`).textContent = fmt(ebitda);
+    $(`o_FCFF_${y}`).textContent = fmt(f);
+    $(`o_TV_${y}`).textContent = "";
+  }
+
+  const tvOk = wacc > g;
+  $("gWarn").style.display = tvOk ? "none" : "block";
+  const tv = tvOk ? fcff[YEARS-1]*(1+g)/(wacc-g) : NaN;
+  $(`o_TV_${YEARS-1}`).textContent = fmt(tv);
+
+  let ev = 0;
+  for (let y = 0; y < YEARS; y++) ev += fcff[y] / Math.pow(1+wacc, y+1);
+  if (tvOk) ev += tv / Math.pow(1+wacc, YEARS);
+
+  const equity = ev + val("cash") - val("debt");
+  const shares = val("shares");
+  const fair = shares > 0 ? equity / shares : NaN;
+
+  $("oBeta").textContent = fmt(equityBeta, 3);
+  $("oKe").textContent = fmt(ke*100, 2) + "%";
+  $("oWacc").textContent = fmt(wacc*100, 2) + "%";
+  $("oTV").textContent = fmt(tv);
+  $("oEV").textContent = fmt(ev);
+  $("oEquity").textContent = fmt(equity);
+  $("oFair").textContent = "$" + fmt(fair, 2);
+
+  if (meta) {
+    $("bFair").textContent = "$" + fmt(fair, 2);
+    if (meta.currentPrice > 0 && isFinite(fair)) {
+      const up = (fair/meta.currentPrice - 1) * 100;
+      const el = $("bUpside");
+      el.textContent = (up>=0?"+":"") + fmt(up,1) + "%";
+      el.style.color = up>=0 ? "var(--green)" : "var(--red)";
+      $("banner").style.borderLeftColor = up>=0 ? "var(--green)" : "var(--red)";
+    }
+  }
+}
+document.addEventListener("input", e => { if (e.target.tagName === "INPUT") recalc(); });
+
+/* ── 티커 자동 입력 ── */
+async function fetchData() {
+  const t = $("ticker").value.trim().toUpperCase();
+  const msg = $("msg");
+  if (!t) { msg.className="err"; msg.textContent="티커를 입력해 주세요. 예: AAPL, MSFT, TSLA"; return; }
+  const btn = $("fetchBtn");
+  btn.disabled = true; btn.textContent = "재무데이터 조회 중…";
+  msg.textContent = "";
+  try {
+    const res = await fetch(`/api/financials?ticker=${encodeURIComponent(t)}`);
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || "조회 실패");
+
+    meta = { companyName: j.companyName, currentPrice: j.currentPrice };
+    $("bName").textContent = j.companyName;
+    $("bPrice").textContent = "$" + fmt(j.currentPrice, 2);
+    $("banner").classList.add("show");
+
+    const gr = val("growth")/100;
+    const grow = (base) => Array.from({length:YEARS}, (_,i)=> +(base*Math.pow(1+gr,i+1)).toFixed(1));
+    const fill = (id, arr) => arr.forEach((v,i)=> $(`${id}_${i}`).value = v);
+
+    fill("ni",    grow(j.netIncome||0));
+    fill("tax",   grow(j.taxExpense||0));
+    fill("int",   Array(YEARS).fill(j.interestExpense||0));
+    fill("dna",   grow(j.depreciationAmortization||0));
+    fill("nwc",   Array(YEARS).fill(j.nwcChange||0));
+    fill("capex", grow(j.capex||0));
+    $("cash").value = j.cash||0;
+    $("debt").value = j.totalDebt||0;
+    $("shares").value = j.sharesOutstandingMillions||1000;
+    if (j.effectiveTaxRate) $("taxRate").value = +(j.effectiveTaxRate*100).toFixed(1);
+    if (j.beta) {
+      const de = val("de"), tr = val("taxRate")/100;
+      $("ub").value = +(j.beta / (1 + (1-tr)*de)).toFixed(3);
+    }
+    msg.className="info";
+    msg.textContent = `ⓘ ${j.companyName} · 최근 연간 실적(${j.period}) 기준, 추정 성장률 ${fmt(gr*100,1)}%를 적용해 5개년을 채웠습니다. 각 셀을 직접 수정할 수 있습니다.`;
+    recalc();
+  } catch (e) {
+    msg.className="err";
+    msg.textContent = "데이터 조회 실패: " + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "자동 입력";
+  }
+}
+$("fetchBtn").addEventListener("click", fetchData);
+$("ticker").addEventListener("keydown", e => { if (e.key === "Enter") fetchData(); });
+recalc();
+</script>
+</body>
+</html>
