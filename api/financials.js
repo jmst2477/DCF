@@ -1,5 +1,6 @@
 // Vercel 서버리스 함수: /api/financials?ticker=AAPL
-// FMP(Financial Modeling Prep) 무료 API로 재무데이터를 가져옵니다.
+// FMP(Financial Modeling Prep) "Stable" API로 재무데이터를 가져옵니다.
+// ※ 2025년 8월 이후 가입 계정은 구버전(v3) 주소를 쓸 수 없어 Stable 주소를 사용합니다.
 // API 키는 Vercel 환경변수 FMP_API_KEY 에 저장됩니다 (코드에 노출 안 됨).
 
 export default async function handler(req, res) {
@@ -12,16 +13,24 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Vercel 환경변수 FMP_API_KEY 가 설정되지 않았습니다." });
   }
 
-  const base = "https://financialmodelingprep.com/api/v3";
+  // 새 주소 체계 (Stable API)
+  const base = "https://financialmodelingprep.com/stable";
   const get = (url) => fetch(url).then((r) => r.json());
 
   try {
     const [profile, income, balance, cashflow] = await Promise.all([
-      get(`${base}/profile/${ticker}?apikey=${key}`),
-      get(`${base}/income-statement/${ticker}?limit=1&apikey=${key}`),
-      get(`${base}/balance-sheet-statement/${ticker}?limit=1&apikey=${key}`),
-      get(`${base}/cash-flow-statement/${ticker}?limit=1&apikey=${key}`),
+      get(`${base}/profile?symbol=${ticker}&apikey=${key}`),
+      get(`${base}/income-statement?symbol=${ticker}&limit=1&apikey=${key}`),
+      get(`${base}/balance-sheet-statement?symbol=${ticker}&limit=1&apikey=${key}`),
+      get(`${base}/cash-flow-statement?symbol=${ticker}&limit=1&apikey=${key}`),
     ]);
+
+    // FMP가 오류를 보낸 경우 그 메시지를 그대로 표시
+    for (const r of [profile, income, balance, cashflow]) {
+      if (r && !Array.isArray(r) && (r["Error Message"] || r.message)) {
+        return res.status(502).json({ error: "FMP 응답: " + (r["Error Message"] || r.message) });
+      }
+    }
 
     const p = (Array.isArray(profile) && profile[0]) || {};
     const i = (Array.isArray(income) && income[0]) || {};
@@ -41,7 +50,7 @@ export default async function handler(req, res) {
       companyName: p.companyName || ticker,
       currentPrice: p.price || 0,
       beta: p.beta || 1.0,
-      sharesOutstandingMillions: M(i.weightedAverageShsOut || 0),
+      sharesOutstandingMillions: M(i.weightedAverageShsOut || i.weightedAverageShsOutDil || 0),
       netIncome: M(i.netIncome),
       taxExpense: M(i.incomeTaxExpense),
       interestExpense: M(i.interestExpense),
