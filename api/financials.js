@@ -1,6 +1,6 @@
 // Vercel 서버리스 함수: /api/financials?ticker=AAPL
 // FMP(Financial Modeling Prep) "Stable" API로 재무데이터를 가져옵니다.
-// ※ 2025년 8월 이후 가입 계정은 구버전(v3) 주소를 쓸 수 없어 Stable 주소를 사용합니다.
+// ※ 무료 플랜에서는 limit 같은 일부 조회 옵션이 유료 전용이라 사용하지 않습니다.
 // API 키는 Vercel 환경변수 FMP_API_KEY 에 저장됩니다 (코드에 노출 안 됨).
 
 export default async function handler(req, res) {
@@ -13,25 +13,35 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Vercel 환경변수 FMP_API_KEY 가 설정되지 않았습니다." });
   }
 
-  // 새 주소 체계 (Stable API)
   const base = "https://financialmodelingprep.com/stable";
-  const get = (url) => fetch(url).then((r) => r.json());
+
+  // 응답이 JSON이 아니면(안내 문구 등) 그 원문을 오류로 돌려줍니다.
+  async function get(url) {
+    const r = await fetch(url);
+    const text = await r.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("FMP 안내: " + text.slice(0, 200));
+    }
+  }
 
   try {
     const [profile, income, balance, cashflow] = await Promise.all([
       get(`${base}/profile?symbol=${ticker}&apikey=${key}`),
-      get(`${base}/income-statement?symbol=${ticker}&limit=1&apikey=${key}`),
-      get(`${base}/balance-sheet-statement?symbol=${ticker}&limit=1&apikey=${key}`),
-      get(`${base}/cash-flow-statement?symbol=${ticker}&limit=1&apikey=${key}`),
+      get(`${base}/income-statement?symbol=${ticker}&apikey=${key}`),
+      get(`${base}/balance-sheet-statement?symbol=${ticker}&apikey=${key}`),
+      get(`${base}/cash-flow-statement?symbol=${ticker}&apikey=${key}`),
     ]);
 
-    // FMP가 오류를 보낸 경우 그 메시지를 그대로 표시
+    // FMP가 JSON 형태의 오류를 보낸 경우 그 메시지를 그대로 표시
     for (const r of [profile, income, balance, cashflow]) {
       if (r && !Array.isArray(r) && (r["Error Message"] || r.message)) {
         return res.status(502).json({ error: "FMP 응답: " + (r["Error Message"] || r.message) });
       }
     }
 
+    // 배열의 첫 번째 항목이 가장 최근 연도입니다.
     const p = (Array.isArray(profile) && profile[0]) || {};
     const i = (Array.isArray(income) && income[0]) || {};
     const b = (Array.isArray(balance) && balance[0]) || {};
