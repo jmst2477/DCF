@@ -93,28 +93,84 @@
     recalc();
   });
 
-  // 같은 저장소의 Vercel 함수(/api/financials)가 있으면 기본 정보를 채운다. GitHub Pages에서는 없음.
-  $('#btn-fetch').addEventListener('click', async () => {
-    const st = $('#fetch-status');
-    const t = (state.ticker || '').trim();
-    if (!t) { st.textContent = '먼저 종목(티커)을 넣어주세요.'; return; }
+  // ---------- 티커 → 자동 입력 (같은 저장소의 Vercel 함수 /api/dcf-inputs, 야후 파이낸스) ----------
+  // 실적·주가·현금·차입금·매출 컨센서스(보통 1~2년차)를 받아 나머지는 아래 규칙으로 가정한다.
+  //  - 컨센서스가 없는 연도의 성장률: 마지막으로 알려진 성장률에서 영구성장률까지 10년차에 걸쳐 직선으로 낮춤
+  //  - 영업이익률·감가상각비·캐펙스 비율: 최근 회계연도 값을 1~10년차에 그대로
+  //  - 정상화 캐펙스 = 최근 실적 평균 캐펙스%, 정상화 감가상각비 = max(평균 D&A%, 캐펙스×0.8) (캐펙스 이하)
+  function assumptionsFrom(j) {
+    const h = j.history;
+    const last = h[h.length - 1];
+    const s = blank();
+    const avg = arr => { const v = arr.filter(x => x != null && Number.isFinite(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    Object.assign(s, {
+      ticker: j.ticker, baseFY: last.fy, price: j.currentPrice, shares: j.sharesOutstandingMillions,
+      cash: j.cash, debt: j.debt, wacc: 0.08, g: 0.02,
+      tax: last.taxRate > 0 && last.taxRate < 0.35 ? last.taxRate : 0.21,
+    });
+    s.revenue[0] = last.revenue;
+    s.revAssumed = Array(N + 1).fill(false);
+    let known = 0;
+    for (const e of j.estimates) {
+      const t = e.fy - last.fy;
+      if (t >= 1 && t <= 5 && t === known + 1) { s.revenue[t] = e.revenue; known = t; }
+    }
+    const prev = h.length > 1 ? h[h.length - 2].revenue : null;
+    const gStart = known ? s.revenue[known] / s.revenue[known - 1] - 1 : prev ? last.revenue / prev - 1 : 0.05;
+    for (let t = known + 1; t <= N; t++) {
+      const gt = +(gStart + (s.g - gStart) * (t - known) / (N - known + 1)).toFixed(4);
+      if (t <= 5) { s.revenue[t] = Math.round(s.revenue[t - 1] * (1 + gt)); s.revAssumed[t] = true; }
+      else s.growth[t] = gt;
+    }
+    const margin = last.ebitMargin != null ? last.ebitMargin : avg(h.map(x => x.ebitMargin)) || 0.1;
+    s.margin = Array(N + 1).fill(margin);
+    s.da = Array(N + 1).fill(last.daPct || 0);
+    s.capex = Array(N + 1).fill(last.capexPct || 0);
+    s.nwc = Array(N + 1).fill(0);
+    s.normCapex = +(avg(h.map(x => x.capexPct)) || last.capexPct || 0).toFixed(4);
+    s.normDA = +Math.min(s.normCapex, Math.max(avg(h.map(x => x.daPct)) || 0, s.normCapex * 0.8)).toFixed(4);
+    return s;
+  }
+
+  async function lookup(ticker) {
+    const st = $('#lookup-status');
+    ticker = (ticker || '').trim().toUpperCase();
+    if (!ticker) { st.textContent = '티커를 넣어주세요.'; return; }
+    $('#lookup-ticker').value = ticker;
+    $('#btn-lookup').disabled = true;
     st.textContent = '불러오는 중...';
     try {
-      const res = await fetch('../api/financials?ticker=' + encodeURIComponent(t));
-      const j = await res.json().catch(() => { throw new Error('이 주소에서는 자동 조회를 쓸 수 없습니다 (Vercel 배포에서만 동작).'); });
+      const res = await fetch('../api/dcf-inputs?ticker=' + encodeURIComponent(ticker));
+      const j = await res.json().catch(() => { throw new Error('자동 조회 서버가 없습니다 (Vercel 배포 주소에서만 동작).'); });
       if (!res.ok) throw new Error(j.error || '조회 실패');
-      if (j.currentPrice) state.price = j.currentPrice;
-      if (j.sharesOutstandingMillions) state.shares = j.sharesOutstandingMillions;
-      if (j.cash != null) state.cash = j.cash;
-      if (j.totalDebt != null) state.debt = j.totalDebt;
-      if (j.effectiveTaxRate > 0 && j.effectiveTaxRate < 0.5) state.tax = j.effectiveTaxRate;
-      renderCommon();
-      recalc();
-      st.textContent = `${j.companyName || t} · ${j.period || ''} 기준 (출처: ${j.source}). 값을 확인하세요.`;
+      state = assumptionsFrom(j);
+      lastLookup = j;
+      renderAll();
+      renderHistory(j);
+      const n = j.estimates.filter(e => e.fy - state.baseFY <= 5).length;
+      const assumed = state.revAssumed.map((a, t) => (a ? t : 0)).filter(Boolean);
+      st.innerHTML = `${esc(j.companyName)} · 컨센서스 ${n}개 연도 반영` +
+        (assumed.length ? ` · <span class="legend-assumed">${assumed[0]}~${assumed[assumed.length - 1]}년차 매출은 임시 가정</span>, 시킹알파 캡처로 바꾸세요` : '');
+      try { history.replaceState(null, '', '?t=' + encodeURIComponent(ticker)); } catch (e) { /* ignore */ }
     } catch (err) {
-      st.textContent = '자동 조회 실패: ' + err.message + ' 직접 입력하세요.';
+      st.textContent = '자동 조회 실패: ' + err.message;
+    } finally {
+      $('#btn-lookup').disabled = false;
     }
-  });
+  }
+  let lastLookup = null;
+  $('#lookup').addEventListener('submit', e => { e.preventDefault(); lookup($('#lookup-ticker').value); });
+
+  function renderHistory(j) {
+    $('#hist-wrap').hidden = false;
+    $('#hist-src').textContent = `(출처: ${j.source}, 차입금 = ${j.debtNote}, 기준일 ${j.balanceDate})`;
+    const h = j.history;
+    const row = (label, f) => `<tr><td>${label}</td>${h.map(x => `<td>${f(x)}</td>`).join('')}</tr>`;
+    $('#hist').innerHTML = `<thead><tr><th>회계연도</th>${h.map(x => `<th>FY${x.fy}</th>`).join('')}</tr></thead><tbody>` +
+      row('매출 (백만 $)', x => fmt(x.revenue)) + row('영업이익률', x => pct(x.ebitMargin)) +
+      row('감가상각비/매출', x => pct(x.daPct)) + row('캐펙스/매출', x => pct(x.capexPct)) +
+      row('실효세율', x => pct(x.taxRate)) + '</tbody>';
+  }
 
   // ---------- 3. 연도별 가정 ----------
   const YEAR_ROWS = [
@@ -142,7 +198,8 @@
     // 매출
     h += '<tr><td><b>매출액</b> <span class="muted small">(1~5년차 = 시킹알파)</span></td>';
     for (let t = 0; t <= N; t++) {
-      if (t <= 5) h += `<td><input class="wide" data-y="revenue" data-t="${t}" type="number" step="any" value="${state.revenue[t]}"></td>`;
+      const assumed = state.revAssumed && state.revAssumed[t];
+      if (t <= 5) h += `<td><input class="wide${assumed ? ' assumed' : ''}" data-y="revenue" data-t="${t}" type="number" step="any" value="${state.revenue[t]}"${assumed ? ' title="임시 가정값 - 시킹알파 추정치로 바꾸세요"' : ''}></td>`;
       else h += `<td class="calc" id="rev-${t}"></td>`;
     }
     h += '<td class="qf"></td></tr>';
@@ -163,6 +220,7 @@
     const { y, t, pct: isPct } = e.target.dataset;
     if (!y) return;
     state[y][+t] = fromInput(e.target.value, !!isPct);
+    if (y === 'revenue' && state.revAssumed) { state.revAssumed[+t] = false; e.target.classList.remove('assumed'); }
     recalc();
   });
   $('#years').addEventListener('click', e => {
@@ -486,7 +544,7 @@
     let n = 0;
     for (const e of estimates) {
       const t = slotFor(e.year);
-      if (e.use && t && e.value > 0) { state.revenue[t] = e.value; n++; }
+      if (e.use && t && e.value > 0) { state.revenue[t] = e.value; if (state.revAssumed) state.revAssumed[t] = false; n++; }
     }
     renderYears();
     recalc();
@@ -612,4 +670,6 @@
 
   syncMode();
   renderAll();
+  const qt = new URLSearchParams(location.search).get('t');
+  if (qt) lookup(qt);
 })();

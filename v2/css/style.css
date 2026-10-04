@@ -89,3 +89,9 @@ footer { padding: 8px 0 30px; }
   .top h1 { font-size: 20px; }
   .kpi .v { font-size: 18px; }
 }
+.lookup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.lookup input { font-size: 18px; padding: 8px 12px; width: 220px; text-transform: uppercase; }
+.lookup button { font-size: 17px; padding: 8px 20px; }
+.grid input.assumed { background: transparent; border: 1px dashed var(--bad); color: var(--text); }
+.legend-assumed { border: 1px dashed var(--bad); padding: 0 6px; border-radius: 4px; }
+#hist-wrap { margin-bottom: 14px; }
