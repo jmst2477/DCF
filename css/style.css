@@ -96,3 +96,6 @@ footer { padding: 8px 0 30px; }
 .legend-assumed { border: 1px dashed var(--bad); padding: 0 6px; border-radius: 4px; }
 #hist-wrap { margin-bottom: 14px; }
 .years th.off { opacity: .45; }
+.drop-sm { padding: 10px 14px; margin-bottom: 12px; text-align: left; }
+.drop-sm p { margin: 4px 0; }
+#pdf-result table { width: auto; }

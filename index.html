@@ -68,6 +68,12 @@
   <!-- 2. 공통 가정 -->
   <section class="card">
     <h2><span class="step">2</span> 기본 정보와 공통 가정</h2>
+    <div id="pdf-drop" class="drop drop-sm" tabindex="0">
+      <p><b>시킹알파 재무제표 PDF 올리기</b> <span class="muted small">(선택, 더 정확함)</span></p>
+      <p class="muted small">시킹알파 종목 페이지 → Financials → <b>Annual</b>에서 Income Statement, Balance Sheet, Cash Flow를 PDF로 받아 세 개를 한꺼번에 끌어다 놓거나 클릭해서 고르세요. 실적·현금·차입금·주식수가 PDF 값으로 바뀌고, 금융 자회사 차입금·대출채권은 자동으로 뺍니다. 티커를 먼저 조회하면 주가·매출 컨센서스도 함께 쓰입니다.</p>
+      <input id="pdf-file" type="file" accept="application/pdf,.pdf" multiple hidden>
+    </div>
+    <div id="pdf-result"></div>
     <div id="hist-wrap" class="table-scroll" hidden>
       <h3>최근 실적 <span class="muted small" id="hist-src"></span></h3>
       <table id="hist" class="grid"></table>
@@ -108,6 +114,7 @@
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="js/dcf.js"></script>
 <script src="js/parser.js"></script>
+<script src="js/sapdf.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
