@@ -89,7 +89,40 @@
     return Number.isFinite(n) ? n : 0;
   }
 
-  const api = { compute, sensitivity, reverse, YEARS, EST_YEARS };
+  /* 기본(강의) 방식: 원본 「DCF Valuation Model」 엑셀과 같은 계산.
+   * 가정은 모든 해에 똑같이 적용. 매출_t = 0년차 매출 × (1+성장률)^t, 영업이익 = 매출 × 영업이익률,
+   * 감가상각비·캐펙스·순운전자본증감 = 매출 × 각 비율, FCFF = 영업이익×(1−세율) + 감가상각비 − 캐펙스 − 순운전자본증감.
+   * 영구가치 = 마지막 해 FCFF × (1+g) ÷ (WACC − g). 자기자본 = 기업가치 − 차입금 + 현금
+   * (원본 엑셀 B36은 차입금을 더하는 부호 실수가 있어 여기서는 뺌). */
+  function simple(b) {
+    const n = Math.max(1, Math.min(10, Math.round(num(b.years) || 5)));
+    const rows = [];
+    let pvSum = 0, rev = num(b.rev0);
+    for (let t = 1; t <= n; t++) {
+      rev = rev * (1 + num(b.growth));
+      const ebit = rev * num(b.margin);
+      const taxes = ebit * num(b.tax);
+      const nopat = ebit - taxes;
+      const da = rev * num(b.da);
+      const capex = rev * num(b.capex);
+      const dNwc = rev * num(b.nwc);
+      const fcff = nopat + da - capex - dNwc;
+      const df = 1 / Math.pow(1 + num(b.wacc), t);
+      const pv = fcff * df;
+      pvSum += pv;
+      rows.push({ t, revenue: rev, ebit, taxes, nopat, da, capex, dNwc, fcff, df, pv });
+    }
+    const last = rows[n - 1];
+    const tv = num(b.wacc) > num(b.g) ? last.fcff * (1 + num(b.g)) / (num(b.wacc) - num(b.g)) : NaN;
+    const pvTv = tv * last.df;
+    const ev = pvSum + pvTv;
+    const equity = ev - num(b.debt) + num(b.cash);
+    const perShare = num(b.shares) > 0 ? equity / num(b.shares) : NaN;
+    const upside = num(b.price) > 0 ? perShare / num(b.price) - 1 : null;
+    return { horizon: n, rows, pvSum, tv, pvTv, ev, equity, perShare, upside, tvShare: pvTv / ev };
+  }
+
+  const api = { compute, simple, sensitivity, reverse, YEARS, EST_YEARS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DCF = api;
 })(this);
