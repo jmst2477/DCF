@@ -302,7 +302,7 @@
       kpi('현재가 대비', ok && up != null ? `<span class="${up >= 0 ? 'pos' : 'neg'}">${up >= 0 ? '+' : ''}${pct(up)}</span>` : '–') +
       kpi('기업가치 (EV)', fmt(r.ev)) +
       kpi('자기자본가치', fmt(r.equity)) +
-      kpi('1~10년 FCFF 현재가치 합', fmt(r.pvSum)) +
+      kpi(`1~${r.horizon}년 FCFF 현재가치 합`, fmt(r.pvSum)) +
       kpi('영구가치 현재가치', fmt(r.pvTv)) +
       kpi('EV 중 영구가치 비중', pct(r.tvShare)) +
       kpi(`예측 기간`, `${r.horizon}년 <span class="muted small">(~FY${state.baseFY + r.horizon})</span>`) +
@@ -633,7 +633,7 @@
 
     ws.getColumn(1).width = 40;
     cols.forEach(c => { ws.getColumn(c).width = 13; });
-    put('A1', `DCF Valuation Model v2 (10년 연도별 + 정상화 영구가치) - ${state.ticker || ''}`).font = { bold: true, size: 13 };
+    put('A1', `DCF Valuation Model v2 (추정치 연도별 + 정상화 영구가치) - ${state.ticker || ''}`).font = { bold: true, size: 13 };
     put('A2', '단위: 백만 달러, 주식수 백만 주. 노란 칸(파란 글씨)만 입력하면 나머지는 자동 계산됩니다. 생성일 ' + new Date().toISOString().slice(0, 10));
     put('A4', '1. 공통 가정').font = { bold: true };
     const common = [
@@ -656,7 +656,7 @@
       31: '잉여현금흐름 (FCFF, SBC 차감)', 32: '할인계수 (Discount Factor)', 33: 'FCFF 현재가치 (PV)',
     };
     Object.entries(labels).forEach(([row, l]) => put('A' + row, l));
-    put('A24', '  ↑ 1~5년차 매출은 시킹알파 추정치 입력, 6~10년차는 성장률 입력. 비율은 연도별로 입력').font = { italic: true, color: { argb: 'FF808080' } };
+    put('A24', '  ↑ 매출은 시킹알파 추정치가 있는 해까지만 입력. 비율은 연도별로 입력').font = { italic: true, color: { argb: 'FF808080' } };
 
     cols.forEach((c, t) => {
       const p = cols[t - 1];
