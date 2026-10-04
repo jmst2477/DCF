@@ -1,4 +1,4 @@
-/* global DCF, SAParser, Tesseract, ExcelJS */
+/* global DCF, SAParser, SAPdf, Tesseract, ExcelJS */
 (function () {
   'use strict';
 
@@ -142,7 +142,11 @@
     s.margin = Array(N + 1).fill(margin);
     s.da = Array(N + 1).fill(last.daPct || 0);
     s.capex = Array(N + 1).fill(last.capexPct || 0);
-    const nwc = last.nwcPct != null ? Math.max(-0.2, Math.min(0.5, last.nwcPct)) : 0;
+    // 금융 자회사 채권(예: CAT 파이낸셜)이 매출채권에 섞이면 비율이 비정상적으로 커지므로 20%로 제한
+    const NWC_CAP = 0.2;
+    const nwcRaw = last.nwcPct != null ? last.nwcPct : 0;
+    const nwc = Math.max(-0.1, Math.min(NWC_CAP, nwcRaw));
+    s.nwcNote = nwcRaw > NWC_CAP ? `운전자본/매출이 ${(nwcRaw * 100).toFixed(1)}%로 높게 나와 20%로 제한했습니다 (금융 자회사 채권이 섞였을 수 있음). 필요하면 고치세요.` : '';
     s.nwc = Array(N + 1).fill(+nwc.toFixed(4));
     s.beta = j.beta || 0;
     s.sbc = last.sbcPct || 0;
@@ -170,7 +174,8 @@
       const assumed = state.revAssumed.map((a, t) => (a && t <= state.horizon ? t : 0)).filter(Boolean);
       st.innerHTML = `${esc(j.companyName)} · FY${state.baseFY + state.horizon}까지 ${state.horizon}년 예측 (애널리스트 컨센서스)` +
         (assumed.length ? ` · <span class="legend-assumed">${assumed[0]}~${assumed[assumed.length - 1]}년차 매출은 임시 가정</span>` : '') +
-        ' · 시킹알파 매출 추정치 캡처를 올리면 그 마지막 해까지 늘어납니다';
+        ' · 시킹알파 매출 추정치 캡처를 올리면 그 마지막 해까지 늘어납니다' +
+        (state.nwcNote ? `<br><span class="neg">${esc(state.nwcNote)}</span>` : '');
       try { history.replaceState(null, '', '?t=' + encodeURIComponent(ticker)); } catch (e) { /* ignore */ }
     } catch (err) {
       st.textContent = '자동 조회 실패: ' + err.message;
@@ -218,13 +223,13 @@
   function renderYears() {
     const fy = t => 'FY' + (state.baseFY + t);
     let h = '<thead><tr><th></th>';
-    const off = t => (t > state.horizon ? ' class="off"' : '');
-    for (let t = 0; t <= N; t++) h += `<th${off(t)}>${t === 0 ? '0년차 실적' : t + '년차'}<br><span class="muted small">${t > state.horizon ? '미사용' : fy(t)}</span></th>`;
+    const H = Math.max(1, Math.min(N, state.horizon || 1)); // 예측 기간까지만 보여줌
+    for (let t = 0; t <= H; t++) h += `<th>${t === 0 ? '0년차 실적' : t + '년차'}<br><span class="muted small">${fy(t)}</span></th>`;
     h += '<th class="qf">한 번에 넣기</th></tr></thead><tbody>';
 
     // 성장률
     h += '<tr><td>매출 성장률</td>';
-    for (let t = 0; t <= N; t++) {
+    for (let t = 0; t <= H; t++) {
       if (t === 0) h += '<td></td>';
       else if (t <= 5) h += `<td class="calc" id="g-${t}"></td>`;
       else h += `<td><input data-y="growth" data-t="${t}" data-pct="1" type="number" step="any" value="${toInput(state.growth[t], true)}"></td>`;
@@ -232,8 +237,8 @@
     h += '<td class="qf"></td></tr>';
 
     // 매출
-    h += '<tr><td><b>매출액</b> <span class="muted small">(1~5년차 = 시킹알파)</span></td>';
-    for (let t = 0; t <= N; t++) {
+    h += '<tr><td><b>매출액</b> <span class="muted small">(추정치)</span></td>';
+    for (let t = 0; t <= H; t++) {
       const assumed = state.revAssumed && state.revAssumed[t];
       if (t <= 5) h += `<td><input class="wide${assumed ? ' assumed' : ''}" data-y="revenue" data-t="${t}" type="number" step="any" value="${state.revenue[t]}"${assumed ? ' title="임시 가정값 - 시킹알파 추정치로 바꾸세요"' : ''}></td>`;
       else h += `<td class="calc" id="rev-${t}"></td>`;
@@ -242,7 +247,7 @@
 
     for (const r of YEAR_ROWS) {
       h += `<tr><td>${r.label} (%)</td>`;
-      for (let t = 0; t <= N; t++) {
+      for (let t = 0; t <= H; t++) {
         if (t === 0) { h += `<td class="muted">${r.key === 'nwc' ? '' : pct(state[r.key][0])}</td>`; continue; }
         h += `<td><input data-y="${r.key}" data-t="${t}" data-pct="1" type="number" step="any" value="${toInput(state[r.key][t], true)}"></td>`;
       }
@@ -265,24 +270,7 @@
     const inp = $(`[data-qf="${key}"]`);
     if (inp.value === '') return;
     const v = fromInput(inp.value, true);
-    for (let t = 1; t <= N; t++) state[key][t] = v;
-    renderYears();
-    recalc();
-  });
-
-  // 10년으로 연장: 추정치가 있는 마지막 해의 성장률에서 영구성장률까지 10년차에 걸쳐 직선으로 낮춘다
-  $('#btn-fade').addEventListener('click', () => {
-    let tl = 0;
-    for (let t = 1; t <= 5; t++) if (state.revenue[t] > 0 && (state.revAssumed ? !state.revAssumed[t] : true) && t <= Math.max(state.horizon, 1)) tl = t;
-    if (!tl || !(state.revenue[tl - 1] > 0)) return;
-    const g0 = state.revenue[tl] / state.revenue[tl - 1] - 1;
-    for (let t = tl + 1; t <= N; t++) {
-      const gt = +(g0 + (state.g - g0) * (t - tl) / (N - tl + 1)).toFixed(4);
-      if (t <= 5) { state.revenue[t] = Math.round(state.revenue[t - 1] * (1 + gt)); if (state.revAssumed) state.revAssumed[t] = true; }
-      else state.growth[t] = gt;
-    }
-    state.horizon = N;
-    renderCommon();
+    for (let t = 1; t <= N; t++) state[key][t] = v; // 모든 연도 (예측 기간이 늘어날 때 대비)
     renderYears();
     recalc();
   });
@@ -314,7 +302,7 @@
       kpi('현재가 대비', ok && up != null ? `<span class="${up >= 0 ? 'pos' : 'neg'}">${up >= 0 ? '+' : ''}${pct(up)}</span>` : '–') +
       kpi('기업가치 (EV)', fmt(r.ev)) +
       kpi('자기자본가치', fmt(r.equity)) +
-      kpi('1~10년 FCFF 현재가치 합', fmt(r.pvSum)) +
+      kpi(`1~${r.horizon}년 FCFF 현재가치 합`, fmt(r.pvSum)) +
       kpi('영구가치 현재가치', fmt(r.pvTv)) +
       kpi('EV 중 영구가치 비중', pct(r.tvShare)) +
       kpi(`예측 기간`, `${r.horizon}년 <span class="muted small">(~FY${state.baseFY + r.horizon})</span>`) +
@@ -358,6 +346,143 @@
     $('#sens').innerHTML = h + '</tbody>';
   }
 
+  // ---------- 시킹알파 재무제표 PDF → 실적·현금·차입금·주식수 덮어쓰기 ----------
+  // PDF 3개(Income Statement, Balance Sheet, Cash Flow, Annual)를 읽어 야후 값 대신 쓴다.
+  // 주가·베타·매출 컨센서스는 PDF에 없으므로 티커 조회 값(또는 현재 입력값)을 그대로 둔다.
+  const PDFJS = CDN + 'pdfjs-dist@3.11.174/build/';
+  let pdfjsReady = null;
+  function loadPdfJs() {
+    if (!pdfjsReady) {
+      pdfjsReady = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = PDFJS + 'pdf.min.js';
+        s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; resolve(window.pdfjsLib); };
+        s.onerror = () => { pdfjsReady = null; reject(new Error('PDF 읽기 도구를 불러오지 못했습니다')); };
+        document.head.appendChild(s);
+      });
+    }
+    return pdfjsReady;
+  }
+  async function readPdf(file) {
+    const lib = await loadPdfJs();
+    const doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const pages = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const tc = await (await doc.getPage(p)).getTextContent();
+      pages.push(tc.items.map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width })));
+    }
+    return SAPdf.parsePages(pages);
+  }
+
+  const KIND_KO = { income: '손익계산서', balance: '대차대조표', cashflow: '현금흐름표' };
+  async function handlePdfs(files) {
+    const out = $('#pdf-result');
+    files = [...files].filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+    if (!files.length) return;
+    out.innerHTML = '<p class="muted small">PDF 읽는 중...</p>';
+    try {
+      const st = {};
+      const unknown = [];
+      for (const f of files) {
+        const r = await readPdf(f);
+        if (r.kind && r.columns.length) st[r.kind] = r; else unknown.push(f.name);
+      }
+      if (!Object.keys(st).length) throw new Error('시킹알파 재무제표 PDF가 아닌 것 같습니다 (표 제목·연도 열을 못 찾음)');
+      const p = SAPdf.toInputs(st);
+      applyPdf(p, unknown);
+    } catch (err) {
+      out.innerHTML = `<p class="neg small">PDF 읽기 실패: ${esc(err.message)}</p>`;
+    }
+  }
+
+  function applyPdf(p, unknown) {
+    const prev = state;
+    const hadLookup = !!(lastLookup && lastLookup.ticker === prev.ticker);
+    const base = hadLookup ? lastLookup : {
+      ticker: prev.ticker, companyName: prev.ticker, currentPrice: prev.price, beta: prev.beta,
+      sharesOutstandingMillions: prev.shares, cash: prev.cash, debt: prev.debt, debtNote: '입력값', history: [], estimates: [],
+    };
+    // 연도별: PDF 값이 있으면 PDF, 없으면 조회 값
+    const baseH = new Map((base.history || []).map(x => [x.fy, x]));
+    const years = p.history.length ? p.history : base.history || [];
+    const history = years.map(x => {
+      const b = baseH.get(x.fy) || {};
+      const m = { ...b };
+      for (const [k, v] of Object.entries(x)) if (v != null) m[k] = v;
+      return m;
+    });
+    if (!history.length || !history[history.length - 1].revenue) {
+      $('#pdf-result').innerHTML = '<p class="neg small">매출 실적이 없습니다. 손익계산서 PDF를 함께 올리거나 먼저 티커를 조회하세요.</p>';
+      return;
+    }
+    const b = p.balance;
+    const merged = {
+      ...base, history,
+      source: '시킹알파 PDF' + (hadLookup ? ' + 야후(주가·컨센서스)' : ''),
+      sharesOutstandingMillions: b && b.shares ? b.shares : base.sharesOutstandingMillions,
+      cash: b && b.cash != null ? b.cash : base.cash,
+      debt: b && b.debt != null ? b.debt : base.debt,
+      debtNote: b && b.debt != null ? '단기+유동성장기+장기차입금 (리스·금융 자회사 제외)' : base.debtNote,
+      balanceDate: b ? b.column : base.balanceDate,
+    };
+    const next = assumptionsFrom(merged);
+    // 같은 종목이면 이미 넣어 둔 매출 추정치(시킹알파 캡처 등)와 예측 기간은 그대로 둔다
+    if (prev.ticker && prev.ticker === next.ticker && prev.baseFY === next.baseFY) {
+      for (let t = 1; t <= N; t++) { next.revenue[t] = prev.revenue[t]; next.growth[t] = prev.growth[t]; }
+      next.revAssumed = prev.revAssumed;
+      next.horizon = prev.horizon;
+      next.wacc = prev.wacc; next.g = prev.g; next.rf = prev.rf; next.erp = prev.erp;
+    }
+    // 운전자본은 PDF에서 금융 자회사 채권을 뺀 값이므로 20% 상한 안내는 필요 없음
+    const last = history[history.length - 1];
+    if (p.kinds.includes('balance') && last.nwcPct != null) {
+      next.nwc = Array(N + 1).fill(+Math.max(-0.1, Math.min(0.5, last.nwcPct)).toFixed(4));
+      next.nwcNote = '';
+    }
+
+    const rows = [
+      ['매출 (0년차)', prev.revenue[0], next.revenue[0], fmt],
+      ['영업이익률', prev.margin[1], next.margin[1], pct],
+      ['감가상각비/매출', prev.da[1], next.da[1], v => pct(v, 2)],
+      ['캐펙스/매출', prev.capex[1], next.capex[1], v => pct(v, 2)],
+      ['운전자본/매출', prev.nwc[1], next.nwc[1], pct],
+      ['법인세율', prev.tax, next.tax, pct],
+      ['발행주식수 (백만 주)', prev.shares, next.shares, v => fmt(v, 1)],
+      ['현금+단기투자', prev.cash, next.cash, fmt],
+      ['차입금', prev.debt, next.debt, fmt],
+    ];
+    const prevPS = DCF.compute(modelInput()).perShare;
+    state = next;
+    lastLookup = merged;
+    renderAll();
+    renderHistory(merged);
+    const nowPS = DCF.compute(modelInput()).perShare;
+    const notes = [];
+    if (b && (b.financeDebt || b.financeLoans)) {
+      notes.push(`금융 자회사(Finance Div.) 차입금 ${fmt(b.financeDebt)}와 대출채권 ${fmt(b.financeLoans)}은 차입금·운전자본에서 뺐습니다.`);
+    }
+    if (b && b.column === 'Last Report') notes.push('현금·차입금·주식수는 가장 최근 분기(Last Report) 값입니다.');
+    const missing = ['income', 'balance', 'cashflow'].filter(k => !p.kinds.includes(k));
+    if (missing.length) notes.push(`${missing.map(k => KIND_KO[k]).join(', ')} PDF가 없어 그 항목은 기존 값을 썼습니다.`);
+    if (unknown.length) notes.push(`읽지 못한 파일: ${unknown.map(esc).join(', ')}`);
+    if (!hadLookup) notes.push('주가·매출 컨센서스는 PDF에 없습니다. 티커를 먼저 조회하면 함께 채워집니다.');
+    const same = (a, c) => a != null && c != null && Math.abs(a - c) <= Math.max(1e-4, Math.abs(c) * 1e-4);
+    $('#pdf-result').innerHTML =
+      `<p class="small"><b>${p.kinds.map(k => KIND_KO[k]).join(' · ')} PDF 값을 넣었습니다.</b> 1주당 가치 $${fmt(prevPS, 2)} → <b>$${fmt(nowPS, 2)}</b></p>` +
+      `<div class="table-scroll"><table class="grid"><thead><tr><th>항목</th><th>이전 값</th><th>PDF 값</th></tr></thead><tbody>` +
+      rows.map(([l, a, c, f]) => `<tr><td>${l}</td><td class="muted">${f(a)}</td><td${same(a, c) ? '' : ' class="pos"'}>${f(c)}</td></tr>`).join('') +
+      '</tbody></table></div>' +
+      (notes.length ? `<p class="muted small">${notes.join('<br>')}</p>` : '');
+  }
+
+  const pdfDrop = $('#pdf-drop');
+  pdfDrop.addEventListener('click', () => $('#pdf-file').click());
+  pdfDrop.addEventListener('keydown', e => { if (e.key === 'Enter') $('#pdf-file').click(); });
+  $('#pdf-file').addEventListener('change', e => { handlePdfs(e.target.files); e.target.value = ''; });
+  pdfDrop.addEventListener('dragover', e => { e.preventDefault(); pdfDrop.classList.add('over'); });
+  pdfDrop.addEventListener('dragleave', () => pdfDrop.classList.remove('over'));
+  pdfDrop.addEventListener('drop', e => { e.preventDefault(); pdfDrop.classList.remove('over'); handlePdfs(e.dataTransfer.files); });
+
   // ---------- 1. 캡처 업로드 & 읽기 ----------
   let currentImage = null; // {blob, dataUrl}
   let estimates = [];
@@ -370,7 +495,9 @@
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', e => {
     e.preventDefault(); drop.classList.remove('over');
-    const f = [...e.dataTransfer.files].find(x => x.type.startsWith('image/'));
+    const files = [...e.dataTransfer.files];
+    if (files.some(x => x.type === 'application/pdf')) { handlePdfs(files); return; } // 재무제표 PDF를 여기 놓아도 처리
+    const f = files.find(x => x.type.startsWith('image/'));
     if (f) setImage(f);
   });
   document.addEventListener('paste', e => {
@@ -645,7 +772,7 @@
 
     ws.getColumn(1).width = 40;
     cols.forEach(c => { ws.getColumn(c).width = 13; });
-    put('A1', `DCF Valuation Model v2 (10년 연도별 + 정상화 영구가치) - ${state.ticker || ''}`).font = { bold: true, size: 13 };
+    put('A1', `DCF Valuation Model v2 (추정치 연도별 + 정상화 영구가치) - ${state.ticker || ''}`).font = { bold: true, size: 13 };
     put('A2', '단위: 백만 달러, 주식수 백만 주. 노란 칸(파란 글씨)만 입력하면 나머지는 자동 계산됩니다. 생성일 ' + new Date().toISOString().slice(0, 10));
     put('A4', '1. 공통 가정').font = { bold: true };
     const common = [
@@ -668,7 +795,7 @@
       31: '잉여현금흐름 (FCFF, SBC 차감)', 32: '할인계수 (Discount Factor)', 33: 'FCFF 현재가치 (PV)',
     };
     Object.entries(labels).forEach(([row, l]) => put('A' + row, l));
-    put('A24', '  ↑ 1~5년차 매출은 시킹알파 추정치 입력, 6~10년차는 성장률 입력. 비율은 연도별로 입력').font = { italic: true, color: { argb: 'FF808080' } };
+    put('A24', '  ↑ 매출은 시킹알파 추정치가 있는 해까지만 입력. 비율은 연도별로 입력').font = { italic: true, color: { argb: 'FF808080' } };
 
     cols.forEach((c, t) => {
       const p = cols[t - 1];
