@@ -49,6 +49,12 @@ const TYPES = [
   "annualLongTermDebt",
   "annualCurrentDebt",
   "annualDilutedAverageShares",
+  "annualOrdinarySharesNumber",
+  "annualAccountsReceivable",
+  "annualInventory",
+  "annualAccountsPayable",
+  "annualCurrentAccruedExpenses",
+  "annualStockBasedCompensation",
 ];
 
 async function fromYahoo(ticker) {
@@ -101,6 +107,11 @@ async function fromYahoo(ticker) {
       daPct: round(da / rev),
       capexPct: round(Math.abs(v.annualCapitalExpenditure || 0) / rev),
       taxRate: ptx > 0 && tax != null ? round(tax / ptx) : null,
+      // 영업용 순운전자본 = 매출채권 + 재고 − 매입채무 − 미지급비용 (매출 대비)
+      nwcPct: v.annualAccountsReceivable != null
+        ? round(((v.annualAccountsReceivable || 0) + (v.annualInventory || 0) - (v.annualAccountsPayable || 0) - (v.annualCurrentAccruedExpenses || 0)) / rev)
+        : null,
+      sbcPct: v.annualStockBasedCompensation != null ? round(v.annualStockBasedCompensation / rev) : null,
     };
   });
   const lastDate = dates[dates.length - 1];
@@ -112,14 +123,19 @@ async function fromYahoo(ticker) {
     return null;
   };
   const curPrice = raw(price.regularMarketPrice) || raw(fin.currentPrice) || 0;
-  // 발행주식수: sharesOutstanding은 GOOGL처럼 주식 종류가 여럿이면 한 종류만 들어 있어서
-  // 전체 주식 기준(impliedSharesOutstanding, 시가총액÷주가)을 먼저 쓴다.
+  // 발행주식수: 야후 sharesOutstanding·impliedSharesOutstanding·시가총액은 GOOGL처럼 주식 종류가
+  // 여럿이면 한 종류만 담기도 한다. 대차대조표 보통주 수(전 종류 합)와 희석 평균주식수도 함께 보고
+  // 가장 큰 값을 쓴다 (모두 같은 회사 전체 주식을 가리켜야 하므로 작은 값은 일부만 센 것).
   const mcap = raw(price.marketCap) || raw(sdet.marketCap);
-  let shares = M(raw(stats.impliedSharesOutstanding) || 0);
-  if (!shares && curPrice > 0 && mcap) shares = M(mcap / curPrice);
-  if (!shares) shares = M(raw(stats.sharesOutstanding) || 0);
-  const diluted = M(last.annualDilutedAverageShares || 0);
-  if (!shares || diluted > shares * 1.2) shares = diluted;
+  const cands = {
+    implied: M(raw(stats.impliedSharesOutstanding) || 0),
+    marketCap: curPrice > 0 && mcap ? M(mcap / curPrice) : 0,
+    sharesOutstanding: M(raw(stats.sharesOutstanding) || 0),
+    balanceSheet: M(latest("annualOrdinarySharesNumber") || 0),
+    dilutedAvg: M(last.annualDilutedAverageShares || 0),
+  };
+  let shares = 0, sharesSource = "";
+  for (const [k, v] of Object.entries(cands)) if (v > shares) { shares = v; sharesSource = k; }
 
   // 차입금: 장기+단기 차입금(리스 제외)을 우선, 없으면 총부채성 차입금
   const ltd = latest("annualLongTermDebt"), cd = latest("annualCurrentDebt");
@@ -153,6 +169,8 @@ async function fromYahoo(ticker) {
     currentPrice: curPrice,
     beta: raw(stats.beta) || raw(sdet.beta) || null,
     sharesOutstandingMillions: shares,
+    sharesSource,
+    sharesCandidates: cands,
     cash,
     debt,
     debtNote,
