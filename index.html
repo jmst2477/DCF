@@ -27,20 +27,31 @@
 
   <!-- 1. 매출 추정치 캡처 -->
   <section class="card">
-    <h2><span class="step">1</span> 시킹알파 캡처 1장 <span class="muted small">(선택, 넣으면 성장률·이익률이 채워짐)</span></h2>
-    <ol class="guide small">
-      <li>시킹알파에서 종목 검색 → 상단 <b>Earnings(실적)</b> → <b>Estimates(추정치)</b> 탭</li>
-      <li>기간을 <b>Annual(연간)</b>으로 선택</li>
-      <li>화면을 내려 <b>CONSENSUS EPS ESTIMATES</b>와 <b>CONSENSUS 매출(Revenue) ESTIMATES</b> 두 표가 함께 보이게 <b>한 장</b> 캡처</li>
-    </ol>
-    <p class="muted small">→ 매출 표로 <b>매출 성장률</b>(추정치 연평균), EPS 표로 <b>영업이익률</b>(EPS × 주식수 ÷ (1 − 세율) ÷ 매출)을 채웁니다. 현금·차입금·주식수·감가상각비·캐펙스는 티커 조회로 자동으로 들어갑니다.</p>
-    <div id="drop" class="drop" tabindex="0">
-      <p><b>캡처 이미지를 끌어다 놓거나 클릭</b>, 또는 <kbd>Ctrl</kbd>+<kbd>V</kbd></p>
-      <input id="file" type="file" accept="image/*" hidden>
-      <img id="preview" alt="" hidden>
+    <h2><span class="step">1</span> 시킹알파 캡처 2장 <span class="muted small">(선택, 넣으면 성장률·이익률이 채워짐)</span></h2>
+    <p class="muted small">시킹알파에서 종목 검색 → <b>Earnings(실적)</b> → <b>Estimates(추정치)</b> → <b>Annual(연간)</b>. 이 화면에 있는 표 두 개를 하나씩 캡처해서 아래 칸에 넣으세요. 현금·차입금·주식수·감가상각비·캐펙스는 티커 조회로 자동으로 들어갑니다.</p>
+    <div class="slots">
+      <div class="slot">
+        <h3>① EPS 표</h3>
+        <p class="muted small"><b>CONSENSUS EPS ESTIMATES</b> 표 → <b>영업이익률</b>을 채웁니다</p>
+        <div class="drop" data-slot="eps" tabindex="0">
+          <p><b>끌어다 놓거나 클릭</b>, 또는 칸을 누르고 <kbd>Ctrl</kbd>+<kbd>V</kbd></p>
+          <input type="file" accept="image/*" hidden>
+          <img class="preview" alt="" hidden>
+        </div>
+        <span class="slot-status muted small"></span>
+      </div>
+      <div class="slot">
+        <h3>② 매출 표</h3>
+        <p class="muted small"><b>CONSENSUS 매출(Revenue) ESTIMATES</b> 표 → <b>매출 성장률</b>을 채웁니다</p>
+        <div class="drop" data-slot="revenue" tabindex="0">
+          <p><b>끌어다 놓거나 클릭</b>, 또는 칸을 누르고 <kbd>Ctrl</kbd>+<kbd>V</kbd></p>
+          <input type="file" accept="image/*" hidden>
+          <img class="preview" alt="" hidden>
+        </div>
+        <span class="slot-status muted small"></span>
+      </div>
     </div>
     <div class="row">
-      <button id="btn-ocr" class="ghost" hidden>다시 읽기</button>
       <span id="ocr-status" class="muted small"></span>
     </div>
 

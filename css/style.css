@@ -125,3 +125,11 @@ details.adv > summary { cursor: pointer; }
 table.kv { width: auto; min-width: 320px; }
 ol.guide { margin: 4px 0 6px; padding-left: 20px; }
 ol.guide li { margin: 2px 0; }
+/* 캡처 칸 2개 */
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+.slot h3 { margin: 0 0 2px; font-size: 15px; }
+.slot p.small { margin: 0 0 6px; }
+.slot .drop { min-height: 90px; }
+.slot .drop img { max-height: 260px; }
+.slot-status { display: block; margin-top: 4px; }
+@media (max-width: 640px) { .slots { grid-template-columns: 1fr; } }
