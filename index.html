@@ -27,8 +27,17 @@
 
   <!-- 1. 매출 추정치 캡처 -->
   <section class="card">
-    <h2><span class="step">1</span> 시킹알파 캡처 2장 <span class="muted small">(선택, 넣으면 성장률·이익률이 채워짐)</span></h2>
-    <p class="muted small">시킹알파에서 종목 검색 → <b>Earnings(실적)</b> → <b>Estimates(추정치)</b> → <b>Annual(연간)</b>. 이 화면에 있는 표 두 개를 하나씩 캡처해서 아래 칸에 넣으세요. 현금·차입금·주식수·감가상각비·캐펙스는 티커 조회로 자동으로 들어갑니다.</p>
+    <h2><span class="step">1</span> 시킹알파 추정치 넣기 <span class="muted small">(선택, 넣으면 성장률·이익률이 채워짐)</span></h2>
+    <p class="muted small">시킹알파에서 종목 검색 → <b>Earnings(실적)</b> → <b>Estimates(추정치)</b> → <b>Annual(연간)</b>. 자동 가져오기가 안 될 때는 이 화면의 표 두 개를 하나씩 캡처해서 아래 칸에 넣으세요. 현금·차입금·주식수·감가상각비·캐펙스는 티커 조회로 자동으로 들어갑니다.</p>
+    <div class="auto-box">
+      <b>캡처 대신 자동으로 가져오기</b> <span class="muted small">(PC 크롬·엣지, 처음 한 번만 설정)</span>
+      <ol class="guide small">
+        <li>이 버튼을 북마크바로 끌어다 놓으세요 → <a id="sa-bookmarklet" class="bookmarklet" href="#">📈 DCF로 보내기</a> <span class="muted">(북마크바가 안 보이면 Ctrl+Shift+B)</span></li>
+        <li>시킹알파에 로그인한 상태로 종목 페이지(되도록 <b>Earnings → Estimates → Annual</b>)를 열고 그 북마크를 누르세요</li>
+        <li>DCF 창이 열리면서 매출·EPS 추정치가 들어가고 바로 계산됩니다</li>
+      </ol>
+      <span id="sa-status" class="small"></span>
+    </div>
     <div class="slots">
       <div class="slot">
         <h3>① EPS 표</h3>

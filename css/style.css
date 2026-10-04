@@ -133,3 +133,7 @@ ol.guide li { margin: 2px 0; }
 .slot .drop img { max-height: 260px; }
 .slot-status { display: block; margin-top: 4px; }
 @media (max-width: 640px) { .slots { grid-template-columns: 1fr; } }
+/* 시킹알파 자동 가져오기 */
+.auto-box { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 14px; margin: 8px 0 12px; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.auto-box ol { margin: 6px 0; }
+a.bookmarklet { display: inline-block; padding: 3px 10px; border-radius: 6px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; cursor: grab; }
