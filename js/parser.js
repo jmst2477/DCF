@@ -83,8 +83,23 @@
     }
     if (dup) warnings.push('같은 연도가 여러 번 나왔습니다. Quarterly(분기)가 아니라 Annual(연간) 화면인지 확인하세요. 연도별 첫 값만 사용했습니다.');
     const result = [...byYear.values()].sort((a, b) => a.year - b.year);
-    if (!result.length) warnings.push('매출 추정치를 찾지 못했습니다. Revenue Estimates 표가 잘 보이게 다시 캡처하거나 값을 직접 입력하세요.');
+    if (!result.length) {
+      warnings.push(looksLikeEps(all)
+        ? 'EPS(주당순이익) 추정치 표를 캡처하셨습니다. 같은 Earnings → Estimates 화면에서 아래로 내려 "Revenue Estimates"(매출 추정치) 표를 캡처해 주세요. 매출 값은 1.92B처럼 B/M 단위가 붙어 있습니다.'
+        : '매출 추정치를 찾지 못했습니다. Revenue Estimates(매출 추정치) 표가 잘 보이게 다시 캡처하거나 값을 직접 입력하세요.');
+    }
     return { estimates: result, warnings, lines: all };
+  }
+
+  // 기간 + 단위 없는 작은 숫자(예: "Jan 2027 3.48 103.36%")가 대부분이면 EPS 표
+  function looksLikeEps(lines) {
+    if (lines.some(l => /\bEPS\b/i.test(l))) return true;
+    let n = 0;
+    for (const l of lines) {
+      const p = findPeriods(l);
+      if (p.length === 1 && /^\s*-?\d{1,3}\.\d{2}\b/.test(l.slice(p[0].end))) n++;
+    }
+    return n >= 2;
   }
 
   // "Revenue Estimates" 제목이 보이면 그 아래(다음 EPS 표 전까지)만 사용
