@@ -12,7 +12,7 @@
    - 영업이익률·감가상각비·캐펙스 비율: 최근 회계연도 값
    - 정상화 캐펙스 = 최근 4년 평균 캐펙스%, 정상화 감가상각비 = max(평균 D&A%, 캐펙스×0.8)
    - 할인율 8%, 영구성장률 2%, 운전자본 0 (강의 기본값)
-3. 시킹알파 캡처를 올리면 OCR(Tesseract.js, 브라우저 안)이나 Claude API(선택, 본인 API 키)로 매출 추정치를 읽어 1~5년차에 넣습니다.
+3. 시킹알파 Estimates 캡처를 올리면 OCR(Tesseract.js, 브라우저 안)이나 Claude API(선택)로 읽습니다. Revenue 표 → 연도별 매출, EBIT 표 → 영업이익률, EBITDA 표 → 감가상각비/매출(EBITDA−EBIT), Capital Expenditure 표 → 캐펙스/매출. 추정치가 없는 칸(운전자본 등)은 최근 실적을 그대로 쓰고 점선으로 표시합니다.
 4. (선택) 시킹알파 Financials → Annual의 Income Statement / Balance Sheet / Cash Flow PDF 3개를 올리면 실적·현금·차입금·주식수를 PDF 값으로 바꿉니다 (pdf.js, 브라우저 안). "Finance Div." 항목(금융 자회사 차입금·대출채권)은 차입금과 운전자본에서 뺍니다. 이전 값과 PDF 값을 표로 보여 줍니다.
 5. 결과에 현재가가 가정하는 영구성장률·영업이익률(역DCF)이 함께 나옵니다.
 6. "엑셀 다운로드"는 「DCF 개선판 v2」와 같은 셀 배치·수식의 .xlsx를 만듭니다.

@@ -1,4 +1,4 @@
-// 시킹알파 Earnings → Estimates 화면 OCR 텍스트에서 연도별 매출 추정치를 뽑아낸다.
+// 시킹알파 Earnings → Estimates 화면 OCR 텍스트에서 연도별 추정치(매출, EBIT, EBITDA, 캐펙스)를 뽑아낸다.
 // 화면 예: "FY 2027  614.82B  23.32%  ...  590.10B  640.00B  38"
 //          "Jan 2028  1.92B  28.86% ..."  (회계연도 말 월 표기)
 // 매출 값은 B/M/K/T 단위가 붙은 숫자, EPS는 단위가 없으므로 자연스럽게 걸러진다.
@@ -63,32 +63,66 @@
     return out;
   }
 
-  // 결과: [{year, label, value(백만 달러), raw, source:'row'|'column'}], 연도 오름차순
+  // 표 제목 → 항목. 시킹알파 Estimates 화면은 Revenue 외에 EBIT, EBITDA, Capital Expenditure 등도 연도별로 보여 준다.
+  const METRICS = [
+    { key: 'ebitda', re: /\bEBITDA\b/i },
+    { key: 'ebit', re: /\bEBIT\b(?!DA)/i },
+    { key: 'capex', re: /capital\s*expenditure|\bcapex\b/i },
+    { key: 'revenue', re: /\brevenue\b|\bsales\b/i },
+    { key: null, re: /\bEPS\b|net\s*income|cash\s*flow|dividend|book\s*value|pre-?tax/i }, // 쓰지 않는 표
+  ];
+  const METRIC_KO = { revenue: '매출', ebit: 'EBIT(영업이익)', ebitda: 'EBITDA', capex: '캐펙스' };
+
+  function metricOf(line) {
+    if (findPeriods(line).length || findMoney(line).length) return undefined; // 숫자가 있는 줄은 제목이 아님
+    for (const m of METRICS) if (m.re.test(line)) return m.key;
+    return undefined;
+  }
+
+  // 결과: [{metric, year, label, value(백만 달러), raw, source:'row'|'column'}], 항목·연도 순
   function parseEstimates(text) {
     const all = clean(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const lines = revenueSection(all);
     const warnings = [];
-    let found = parseRows(lines);
-    if (found.length < 2) {
-      const col = parseColumns(lines);
-      if (col.length > found.length) found = col;
+    const out = [];
+    for (const sec of sections(all)) {
+      let found = parseRows(sec.lines);
+      if (found.length < 2) {
+        const col = parseColumns(sec.lines);
+        if (col.length > found.length) found = col;
+      }
+      // 같은 연도가 여러 번 나오면 분기 화면일 가능성
+      const byYear = new Map();
+      let dup = false;
+      for (const r of found) {
+        if (byYear.has(r.year)) { dup = true; continue; }
+        byYear.set(r.year, Object.assign({ metric: sec.metric }, r));
+      }
+      if (dup) warnings.push(`${METRIC_KO[sec.metric]}: 같은 연도가 여러 번 나왔습니다. Quarterly(분기)가 아니라 Annual(연간) 화면인지 확인하세요. 연도별 첫 값만 사용했습니다.`);
+      out.push(...[...byYear.values()].sort((a, b) => a.year - b.year));
     }
-
-    // 같은 연도가 여러 번 나오면 분기 화면일 가능성
-    const byYear = new Map();
-    let dup = false;
-    for (const r of found) {
-      if (byYear.has(r.year)) { dup = true; continue; }
-      byYear.set(r.year, r);
-    }
-    if (dup) warnings.push('같은 연도가 여러 번 나왔습니다. Quarterly(분기)가 아니라 Annual(연간) 화면인지 확인하세요. 연도별 첫 값만 사용했습니다.');
-    const result = [...byYear.values()].sort((a, b) => a.year - b.year);
-    if (!result.length) {
+    if (!out.length) {
       warnings.push(looksLikeEps(all)
         ? 'EPS(주당순이익) 추정치 표를 캡처하셨습니다. 같은 Earnings → Estimates 화면에서 아래로 내려 "Revenue Estimates"(매출 추정치) 표를 캡처해 주세요. 매출 값은 1.92B처럼 B/M 단위가 붙어 있습니다.'
-        : '매출 추정치를 찾지 못했습니다. Revenue Estimates(매출 추정치) 표가 잘 보이게 다시 캡처하거나 값을 직접 입력하세요.');
+        : '추정치를 찾지 못했습니다. 표가 잘 보이게 다시 캡처하거나 값을 직접 입력하세요.');
     }
-    return { estimates: result, warnings, lines: all };
+    return { estimates: out, warnings, lines: all };
+  }
+
+  // 표 제목 줄로 구간을 나눔. 제목이 하나도 없으면 전체를 매출 표로 봄 (예전 동작)
+  function sections(lines) {
+    const heads = [];
+    lines.forEach((l, i) => { const m = metricOf(l); if (m !== undefined) heads.push({ i, metric: m }); });
+    if (!heads.length) return [{ metric: 'revenue', lines }];
+    const secs = [];
+    heads.forEach((h, k) => {
+      if (!h.metric) return;
+      const end = k + 1 < heads.length ? heads[k + 1].i : lines.length;
+      // 같은 항목 제목이 연달아 나오면(표 제목 + 열 제목) 하나로 합침
+      const prev = secs[secs.length - 1];
+      if (prev && prev.metric === h.metric && prev.end === h.i) { prev.lines.push(...lines.slice(h.i + 1, end)); prev.end = end; return; }
+      secs.push({ metric: h.metric, lines: lines.slice(h.i + 1, end), end });
+    });
+    return secs;
   }
 
   // 기간 + 단위 없는 작은 숫자(예: "Jan 2027 3.48 103.36%")가 대부분이면 EPS 표
@@ -100,15 +134,6 @@
       if (p.length === 1 && /^\s*-?\d{1,3}\.\d{2}\b/.test(l.slice(p[0].end))) n++;
     }
     return n >= 2;
-  }
-
-  // "Revenue Estimates" 제목이 보이면 그 아래(다음 EPS 표 전까지)만 사용
-  function revenueSection(lines) {
-    const start = lines.findIndex(l => /revenue/i.test(l) && /estimate/i.test(l) && !findPeriods(l).length);
-    if (start < 0) return lines;
-    let end = lines.length;
-    for (let i = start + 1; i < lines.length; i++) if (/^EPS\b/i.test(lines[i])) { end = i; break; }
-    return lines.slice(start + 1, end);
   }
 
   // 행 방식: 한 줄에 "기간 + 매출값(단위 포함) ..." — 기간 다음에 처음 나오는 금액이 추정치
@@ -133,7 +158,7 @@
       for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) {
         const money = findMoney(lines[j]);
         if (money.length < 2) continue;
-        if (!/revenue|estimate|consensus/i.test(lines[j]) && j !== i + 1) continue;
+        if (!/revenue|ebit|capital|capex|estimate|consensus/i.test(lines[j]) && j !== i + 1) continue;
         const n = Math.min(periods.length, money.length);
         const out = [];
         for (let k = 0; k < n; k++) {
@@ -145,7 +170,7 @@
     return [];
   }
 
-  const api = { parseEstimates, findPeriods, findMoney, clean };
+  const api = { parseEstimates, findPeriods, findMoney, clean, METRIC_KO };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SAParser = api;
 })(this);
