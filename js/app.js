@@ -140,7 +140,7 @@
     $('#btn-lookup').disabled = true;
     st.textContent = '불러오는 중...';
     try {
-      const res = await fetch('../api/dcf-inputs?ticker=' + encodeURIComponent(ticker));
+      const res = await fetch('api/dcf-inputs?ticker=' + encodeURIComponent(ticker));
       const j = await res.json().catch(() => { throw new Error('자동 조회 서버가 없습니다 (Vercel 배포 주소에서만 동작).'); });
       if (!res.ok) throw new Error(j.error || '조회 실패');
       state = assumptionsFrom(j);

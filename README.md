@@ -1,7 +1,7 @@
-# DCF 계산기 v2 (`v2/`)
+# DCF 계산기
 
 종목(티커)을 넣으면 10년 DCF를 바로 계산하고, 시킹알파 **Earnings → Estimates** 캡처로 3~5년차 매출을 바꿀 수 있는 페이지입니다.
-주소: `https://<배포주소>/v2/` · 바로가기: `https://<배포주소>/v2/?t=GOOGL`
+바로가기: `https://<배포주소>/?t=GOOGL`
 
 ## 흐름
 1. 티커 입력 → `/api/dcf-inputs` (Vercel 함수, 야후 파이낸스, 키 불필요)가 최근 4년 실적, 주가, 주식수, 현금, 차입금(리스 제외), 매출 컨센서스(보통 2개 연도)를 가져옵니다.
@@ -14,7 +14,7 @@
 4. "엑셀 다운로드"는 「DCF 개선판 v2」와 같은 셀 배치·수식의 .xlsx를 만듭니다.
 
 ## 파일
-- `../api/dcf-inputs.js` 티커 → DCF 입력값 (서버, Vercel)
+- `api/dcf-inputs.js` 티커 → DCF 입력값 (서버, Vercel)
 - `index.html`, `css/style.css` 화면
 - `js/dcf.js` DCF 계산 (엑셀 수식과 1:1)
 - `js/parser.js` OCR 글자 → 연도별 매출 추정치

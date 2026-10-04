@@ -1,414 +1,114 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DCF 밸류에이션 | 적정주가 계산기</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap');
-
-:root{
-  --bg:#F3F5F7; --surface:#FFFFFF; --ink:#17242F; --sub:#5B6B78;
-  --line:#DDE3E8; --green:#0B6B53; --red:#B23A2F;
-  --input-text:#1741C9; --input-bg:#FFF9DE;
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans KR',sans-serif;padding:28px 16px 60px;}
-.wrap{max-width:1100px;margin:0 auto;}
-.eyebrow{font-size:12px;letter-spacing:.14em;color:var(--green);font-weight:700;}
-h1{font-size:26px;font-weight:700;margin:6px 0 4px;letter-spacing:-.02em;}
-.desc{font-size:13px;color:var(--sub);margin-bottom:22px;line-height:1.6;}
-.tag{color:var(--input-text);background:var(--input-bg);padding:1px 6px;border-radius:3px;font-weight:500;}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;box-shadow:0 1px 2px rgba(23,36,47,.04);}
-.panel h2{font-size:15px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em;}
-.searchbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;}
-#ticker{flex:1 1 220px;padding:10px 14px;font-size:15px;border:1px solid var(--line);border-radius:6px;font-family:'IBM Plex Mono',monospace;text-transform:uppercase;}
-button.primary{padding:10px 22px;font-size:14px;font-weight:700;color:#fff;background:var(--ink);border:none;border-radius:6px;cursor:pointer;}
-button.primary:disabled{background:var(--sub);cursor:wait;}
-button.secondary{padding:8px 16px;font-size:13px;font-weight:700;color:var(--ink);background:var(--surface);border:1px solid var(--ink);border-radius:6px;cursor:pointer;}
-#msg,#epsMsg{flex-basis:100%;font-size:13px;}
-.err{color:var(--red);} .info{color:var(--sub);font-size:12px;}
-.ok{color:var(--green);font-size:13px;}
-.banner{display:none;margin-bottom:18px;gap:28px;flex-wrap:wrap;align-items:baseline;border-left:5px solid var(--sub);}
-.banner.show{display:flex;}
-.banner .lbl{font-size:12px;color:var(--sub);}
-.banner .val{font-size:18px;font-weight:700;font-family:'IBM Plex Mono',monospace;}
-.grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:18px;}
-@media(max-width:900px){.grid{grid-template-columns:1fr;}}
-table{border-collapse:collapse;width:100%;}
-th{font-size:12px;color:var(--sub);font-weight:600;text-align:right;padding:8px 10px;border-bottom:2px solid var(--ink);}
-th:first-child{text-align:left;}
-td{font-size:13px;padding:4px 6px;}
-td.lbl{white-space:nowrap;padding:6px 10px;}
-td.lbl small{display:block;font-size:10px;color:var(--sub);}
-td.num{font-family:'IBM Plex Mono',monospace;text-align:right;padding:6px 10px;}
-tr.subtotal{border-top:1px solid var(--line);background:#FAFBFC;font-weight:700;}
-tr.total{border-top:2px solid var(--ink);font-weight:700;}
-input.cell{width:96px;text-align:right;padding:5px 8px;border:1px solid var(--line);border-radius:4px;background:var(--input-bg);color:var(--input-text);font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;}
-input.cell:focus{outline:2px solid var(--input-text);outline-offset:1px;}
-input.cell.wide{width:120px;}
-.vrow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;gap:12px;font-size:13px;}
-.vrow .num{font-family:'IBM Plex Mono',monospace;font-weight:700;}
-.vrow.derived{border-top:1px dashed var(--line);color:var(--sub);}
-.result{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin-top:8px;background:var(--ink);border-radius:6px;color:#fff;font-weight:700;}
-.result .num{font-family:'IBM Plex Mono',monospace;font-size:16px;}
-.side{display:flex;flex-direction:column;gap:18px;}
-.note{font-size:12px;color:var(--sub);line-height:1.7;}
-.note strong{color:var(--ink);}
-.warn{margin-top:8px;font-size:12px;color:var(--red);display:none;}
-.tableblock{overflow-x:auto;}
-.valuation{margin-top:18px;border-top:2px solid var(--ink);padding-top:10px;max-width:440px;}
-details.paste{margin-bottom:18px;}
-details.paste summary{cursor:pointer;font-size:14px;font-weight:700;list-style:none;display:flex;align-items:center;gap:8px;}
-details.paste summary::before{content:"▸";color:var(--green);transition:transform .15s;}
-details.paste[open] summary::before{transform:rotate(90deg);}
-#epsPaste{width:100%;min-height:110px;margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--input-bg);color:var(--input-text);resize:vertical;}
-.paste-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;}
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DCF 계산기</title>
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="eyebrow">EQUITY VALUATION · FCFF MODEL</div>
-    <h1>DCF 밸류에이션</h1>
-    <p class="desc">티커를 입력하면 최신 연간 재무데이터가 자동 입력됩니다. 단위: 백만 US$ ·
-      <span class="tag">파란 글씨 셀</span>은 직접 수정 가능, 검은 숫자는 자동 계산됩니다.</p>
-  </header>
-
-  <div class="panel searchbar">
-    <input id="ticker" placeholder="티커 입력 (예: AAPL, MSFT, NVDA)">
-    <button class="primary" id="fetchBtn">자동 입력</button>
-    <div id="msg"></div>
+<header class="top">
+  <h1>DCF 계산기</h1>
+  <p class="sub">종목을 입력하면 최근 실적·주가·현금·차입금·애널리스트 매출 컨센서스를 불러와 10년 DCF를 바로 계산합니다. 3~5년차 매출은 시킹알파 <b>Earnings → Estimates</b> 캡처를 올리면 바뀝니다. 단위: 백만 달러, 주식수 백만 주.</p>
+  <form id="lookup" class="lookup">
+    <input id="lookup-ticker" placeholder="티커 (예: GOOGL, SMTC)" autocomplete="off" autocapitalize="characters">
+    <button type="submit" id="btn-lookup">계산</button>
+    <span id="lookup-status" class="muted small"></span>
+  </form>
+  <div class="top-actions">
+    <button id="btn-example" class="ghost">GOOGL 예시 불러오기</button>
+    <button id="btn-reset" class="ghost">초기화</button>
+    <button id="btn-xlsx">엑셀 다운로드</button>
   </div>
+</header>
 
-  <div class="panel">
-    <details class="paste">
-      <summary>시킹알파 EPS 컨센서스 붙여넣기 (선택)</summary>
-      <p class="note" style="margin-top:10px">시킹알파의 Earnings Estimates 표를 마우스로 드래그해 복사한 뒤 아래에 붙여넣고 "EPS 적용"을 누르세요.
-      제목 줄이 섞여 있거나 연도와 숫자가 다른 줄로 나뉘어도 자동으로 인식합니다.
-      연도별 EPS로 <strong>순이익(EPS × 발행주식수)</strong>과 <strong>법인세</strong>를 5개년에 채웁니다.
-      먼저 "자동 입력"으로 발행주식수를 채운 뒤 사용하는 것이 정확합니다.</p>
-      <textarea id="epsPaste" placeholder="예)&#10;Fiscal Period Ending&#9;EPS Estimate&#9;YoY Growth ...&#10;Aug 2026&#10;73.44&#9;785.94%&#9;12.26&#9;67.39&#9;80.16&#9;35&#10;Aug 2027&#10;153.74&#9;109.33%&#9;5.86&#9;89.53&#9;221.27&#9;37"></textarea>
-      <div class="paste-actions">
-        <button class="secondary" id="epsApplyBtn">EPS 적용</button>
-        <div id="epsMsg"></div>
-      </div>
-    </details>
-  </div>
+<main>
+  <!-- 1. 캡처 업로드 -->
+  <section class="card">
+    <h2><span class="step">1</span> 시킹알파 캡처 올리기 <span class="muted small">(3~5년차 매출 바꾸기)</span></h2>
+    <div id="drop" class="drop" tabindex="0">
+      <p><b>여기에 이미지를 끌어다 놓거나</b>, 클릭해서 파일을 고르거나, 캡처 후 <kbd>Ctrl</kbd>+<kbd>V</kbd>로 붙여넣으세요.</p>
+      <input id="file" type="file" accept="image/*" hidden>
+      <img id="preview" alt="" hidden>
+    </div>
 
-  <div class="panel banner" id="banner">
-    <div><div class="lbl">기업명</div><div class="val" id="bName" style="font-family:'IBM Plex Sans KR'">–</div></div>
-    <div><div class="lbl">현재 주가</div><div class="val" id="bPrice">–</div></div>
-    <div><div class="lbl">적정주가 (모델)</div><div class="val" id="bFair">–</div></div>
-    <div><div class="lbl">괴리율 (상승여력)</div><div class="val" id="bUpside">–</div></div>
-  </div>
+    <div class="row ocr-opts">
+      <label>읽기 방식
+        <select id="ocr-mode">
+          <option value="tesseract">브라우저 OCR (무료)</option>
+          <option value="claude">Claude API (더 정확, API 키 필요)</option>
+        </select>
+      </label>
+      <label id="key-wrap" hidden>Anthropic API 키
+        <input id="api-key" type="password" placeholder="sk-ant-..." autocomplete="off">
+      </label>
+      <button id="btn-ocr" disabled>숫자 읽기</button>
+      <span id="ocr-status" class="muted"></span>
+    </div>
+    <p id="key-note" class="muted small" hidden>키는 이 브라우저에만 저장되고, 이미지와 함께 api.anthropic.com으로 직접 전송됩니다. 다른 서버를 거치지 않습니다.</p>
 
-  <div class="grid">
-    <section class="panel">
-      <h2>기업잉여현금흐름(FCFF) 5개년 추정</h2>
-      <div class="tableblock">
-        <table id="fcffTable">
-          <thead><tr id="yearHead"><th>항목</th></tr></thead>
-          <tbody id="fcffBody"></tbody>
+    <div id="est-wrap" hidden>
+      <h3>읽어온 매출 추정치 <span class="muted small">(틀린 값은 고친 뒤 넣으세요)</span></h3>
+      <div id="warnings"></div>
+      <div class="table-scroll">
+        <table id="est-table" class="grid">
+          <thead><tr><th>넣기</th><th>화면 표기</th><th>회계연도</th><th>읽은 글자</th><th>매출 (백만 $)</th><th>들어갈 칸</th></tr></thead>
+          <tbody></tbody>
         </table>
       </div>
-
-      <div class="valuation">
-        <div class="vrow"><span style="font-weight:700">기업가치(EV)</span><span class="num" id="oEV">–</span></div>
-        <div class="vrow"><span>가산: 현금성자산</span><input class="cell wide" id="cash" value="0"></div>
-        <div class="vrow"><span>차감: 총차입금</span><input class="cell wide" id="debt" value="0"></div>
-        <div class="vrow"><span style="font-weight:700">자기자본가치(Equity Value)</span><span class="num" id="oEquity">–</span></div>
-        <div class="vrow"><span>가중평균 발행주식수 (백만 주)</span><input class="cell wide" id="shares" value="1000"></div>
-        <div class="result"><span>주당 자기자본가치 (적정주가)</span><span class="num" id="oFair">–</span></div>
+      <div class="row">
+        <button id="btn-apply">DCF에 넣기</button>
+        <button id="btn-add-row" class="ghost">행 추가</button>
       </div>
-    </section>
+      <details><summary class="muted small">OCR 원문 보기</summary><pre id="ocr-text"></pre></details>
+    </div>
+  </section>
 
-    <section class="side">
-      <div class="panel">
-        <h2>할인율(WACC) 가정</h2>
-        <div class="vrow"><span>무위험이자율 (%)</span><input class="cell" id="rf" value="4.5"></div>
-        <div class="vrow"><span>시장위험프리미엄 (%)</span><input class="cell" id="mrp" value="5.5"></div>
-        <div class="vrow"><span>무차입 베타</span><input class="cell" id="ub" value="1.16"></div>
-        <div class="vrow"><span>세율 (%)</span><input class="cell" id="taxRate" value="21"></div>
-        <div class="vrow"><span>자본구조(부채/자기자본)</span><input class="cell" id="de" value="0.06"></div>
-        <div class="vrow"><span>타인자본비용 (%)</span><input class="cell" id="kd" value="5.4"></div>
-        <div class="vrow derived"><span>주식 베타(Equity Beta)</span><span class="num" id="oBeta">–</span></div>
-        <div class="vrow derived"><span>자기자본비용(Cost of Equity)</span><span class="num" id="oKe">–</span></div>
-        <div class="vrow derived"><span>가중평균자본비용(WACC)</span><span class="num" id="oWacc">–</span></div>
-      </div>
+  <!-- 2. 공통 가정 -->
+  <section class="card">
+    <h2><span class="step">2</span> 기본 정보와 공통 가정</h2>
+    <div id="hist-wrap" class="table-scroll" hidden>
+      <h3>최근 실적 <span class="muted small" id="hist-src"></span></h3>
+      <table id="hist" class="grid"></table>
+    </div>
+    <div class="form-grid" id="common"></div>
+  </section>
 
-      <div class="panel">
-        <h2>영구가치 가정</h2>
-        <div class="vrow"><span>영구성장률 (%)</span><input class="cell" id="g" value="1.5"></div>
-        <div class="vrow"><span>추정 성장률 (%) <small style="color:var(--sub)">1~5년차 적용</small></span><input class="cell" id="growth" value="8"></div>
-        <div class="vrow derived"><span>영구가치(TV)</span><span class="num" id="oTV">–</span></div>
-        <div class="warn" id="gWarn">⚠ 영구성장률이 WACC보다 크거나 같으면 영구가치를 계산할 수 없습니다.</div>
-      </div>
+  <!-- 3. 연도별 가정 -->
+  <section class="card">
+    <h2><span class="step">3</span> 연도별 가정</h2>
+    <p class="muted small">노란 칸이 입력 칸입니다. 1~5년차 매출은 시킹알파 추정치, 6~10년차는 성장률로 계산합니다. 각 행 오른쪽 칸에 값을 넣고 <b>전체</b>를 누르면 1~10년차에 한 번에 들어갑니다.</p>
+    <div class="table-scroll">
+      <table id="years" class="grid years"></table>
+    </div>
+    <div class="row">
+      <button id="btn-fade" class="ghost">6~10년차 성장률 자동 (5년차 성장률 → 영구성장률로 점점 낮춤)</button>
+    </div>
+  </section>
 
-      <div class="panel note">
-        <strong>사용 안내</strong><br>
-        · 자동 입력은 최근 연간 실적에 추정 성장률을 적용해 5개년을 채웁니다.<br>
-        · 시킹알파 EPS 표를 붙여넣으면 순이익·법인세가 컨센서스 기준으로 교체됩니다.<br>
-        · CAPEX·감가상각은 회사 가이던스를 참고해 직접 조정하는 것이 정확합니다.<br>
-        · 본 도구는 교육·참고용이며 투자 판단의 근거가 아닙니다.
-      </div>
-    </section>
-  </div>
-</div>
+  <!-- 4. 결과 -->
+  <section class="card">
+    <h2><span class="step">4</span> 결과</h2>
+    <div class="kpis" id="kpis"></div>
+    <div class="table-scroll">
+      <table id="flows" class="grid"></table>
+    </div>
+    <h3>민감도: 할인율 × 영구성장률 → 1주당 가치</h3>
+    <div class="table-scroll">
+      <table id="sens" class="grid sens"></table>
+    </div>
+  </section>
 
-<script>
-const YEARS = 5;
-let colYears = Array.from({length: YEARS}, (_, i) => new Date().getFullYear() + i); // 열 연도 (EPS 적용 시 교체)
-const ROWS = [
-  { id:"ni",    label:"당기순이익" },
-  { id:"tax",   label:"법인세" },
-  { id:"int",   label:"이자비용" },
-  { id:"dna",   label:"감가상각·무형자산상각비" },
-  { id:"EBITDA",label:"EBITDA", computed:true, cls:"subtotal" },
-  { id:"nwc",   label:"순운전자본(NWC) 변동", note:"현금흐름 영향, 증가 시 음수" },
-  { id:"capex", label:"자본적지출(CAPEX)", note:"양수로 입력, 자동 차감" },
-  { id:"FCFF",  label:"기업잉여현금흐름(FCFF)", computed:true, cls:"total" },
-  { id:"TV",    label:"영구가치(Terminal Value)", computed:true, tvRow:true },
-];
+  <footer class="muted small">
+    계산식은 프로젝트의 「DCF 개선판 v2」 엑셀과 같습니다. 영구가치는 11년차 매출 × (세후 영업이익률 + 정상화 감가상각비 − 정상화 캐펙스) − 운전자본으로 계산합니다.
+    모든 계산은 브라우저 안에서만 이뤄집니다.
+  </footer>
+</main>
 
-let meta = null; // { companyName, currentPrice }
-
-/* ── 표 생성 ── */
-const head = document.getElementById("yearHead");
-for (let y = 0; y < YEARS; y++) {
-  const th = document.createElement("th");
-  th.id = "yh_" + y;
-  th.textContent = colYears[y] + "(E)";
-  head.appendChild(th);
-}
-const body = document.getElementById("fcffBody");
-ROWS.forEach(r => {
-  const tr = document.createElement("tr");
-  if (r.cls) tr.className = r.cls;
-  const td = document.createElement("td");
-  td.className = "lbl";
-  td.innerHTML = r.label + (r.note ? `<small>${r.note}</small>` : "");
-  tr.appendChild(td);
-  for (let y = 0; y < YEARS; y++) {
-    const cell = document.createElement("td");
-    if (r.computed) {
-      cell.className = "num";
-      cell.id = `o_${r.id}_${y}`;
-      if (r.tvRow) cell.style.color = "var(--green)";
-    } else {
-      cell.style.textAlign = "right";
-      const inp = document.createElement("input");
-      inp.className = "cell";
-      inp.id = `${r.id}_${y}`;
-      inp.value = "0";
-      cell.appendChild(inp);
-    }
-    tr.appendChild(cell);
-  }
-  body.appendChild(tr);
-});
-
-/* ── 유틸 ── */
-const $ = id => document.getElementById(id);
-const val = id => { const v = parseFloat(String($(id).value).replace(/,/g,"")); return isNaN(v) ? 0 : v; };
-const fmt = (n, d=0) => (n===null||n===undefined||isNaN(n)||!isFinite(n)) ? "–"
-  : n.toLocaleString("ko-KR",{maximumFractionDigits:d,minimumFractionDigits:d});
-function setYearHeaders(years) {
-  colYears = years;
-  for (let y = 0; y < YEARS; y++) $("yh_" + y).textContent = years[y] + "(E)";
-}
-
-/* ── 계산 (엑셀 수식 재현) ── */
-function recalc() {
-  const rf = val("rf")/100, mrp = val("mrp")/100, ub = val("ub"),
-        taxRate = val("taxRate")/100, de = val("de"), kd = val("kd")/100,
-        g = val("g")/100;
-
-  const equityBeta = ub * (1 + (1 - taxRate) * de);
-  const ke = rf + equityBeta * mrp;
-  const wE = 1/(1+de), wD = de/(1+de);
-  const wacc = wE*ke + wD*kd*(1-taxRate);
-
-  const fcff = [];
-  for (let y = 0; y < YEARS; y++) {
-    const ni = val(`ni_${y}`), tax = val(`tax_${y}`), it = val(`int_${y}`),
-          dna = val(`dna_${y}`), nwc = val(`nwc_${y}`), capex = val(`capex_${y}`);
-    const ebitda = ni + tax + it + dna;
-    const f = ebitda + nwc - it - tax - capex;
-    fcff.push(f);
-    $(`o_EBITDA_${y}`).textContent = fmt(ebitda);
-    $(`o_FCFF_${y}`).textContent = fmt(f);
-    $(`o_TV_${y}`).textContent = "";
-  }
-
-  const tvOk = wacc > g;
-  $("gWarn").style.display = tvOk ? "none" : "block";
-  const tv = tvOk ? fcff[YEARS-1]*(1+g)/(wacc-g) : NaN;
-  $(`o_TV_${YEARS-1}`).textContent = fmt(tv);
-
-  let ev = 0;
-  for (let y = 0; y < YEARS; y++) ev += fcff[y] / Math.pow(1+wacc, y+1);
-  if (tvOk) ev += tv / Math.pow(1+wacc, YEARS);
-
-  const equity = ev + val("cash") - val("debt");
-  const shares = val("shares");
-  const fair = shares > 0 ? equity / shares : NaN;
-
-  $("oBeta").textContent = fmt(equityBeta, 3);
-  $("oKe").textContent = fmt(ke*100, 2) + "%";
-  $("oWacc").textContent = fmt(wacc*100, 2) + "%";
-  $("oTV").textContent = fmt(tv);
-  $("oEV").textContent = fmt(ev);
-  $("oEquity").textContent = fmt(equity);
-  $("oFair").textContent = "$" + fmt(fair, 2);
-
-  if (meta) {
-    $("bFair").textContent = "$" + fmt(fair, 2);
-    if (meta.currentPrice > 0 && isFinite(fair)) {
-      const up = (fair/meta.currentPrice - 1) * 100;
-      const el = $("bUpside");
-      el.textContent = (up>=0?"+":"") + fmt(up,1) + "%";
-      el.style.color = up>=0 ? "var(--green)" : "var(--red)";
-      $("banner").style.borderLeftColor = up>=0 ? "var(--green)" : "var(--red)";
-    }
-  }
-}
-document.addEventListener("input", e => { if (e.target.tagName === "INPUT") recalc(); });
-
-/* ── 티커 자동 입력 ── */
-async function fetchData() {
-  const t = $("ticker").value.trim().toUpperCase();
-  const msg = $("msg");
-  if (!t) { msg.className="err"; msg.textContent="티커를 입력해 주세요. 예: AAPL, MSFT, TSLA"; return; }
-  const btn = $("fetchBtn");
-  btn.disabled = true; btn.textContent = "재무데이터 조회 중…";
-  msg.textContent = "";
-  try {
-    const res = await fetch(`/api/financials?ticker=${encodeURIComponent(t)}`);
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || "조회 실패");
-
-    meta = { companyName: j.companyName, currentPrice: j.currentPrice };
-    $("bName").textContent = j.companyName;
-    $("bPrice").textContent = "$" + fmt(j.currentPrice, 2);
-    $("banner").classList.add("show");
-
-    const gr = val("growth")/100;
-    const grow = (base) => Array.from({length:YEARS}, (_,i)=> +(base*Math.pow(1+gr,i+1)).toFixed(1));
-    const fill = (id, arr) => arr.forEach((v,i)=> $(`${id}_${i}`).value = v);
-
-    fill("ni",    grow(j.netIncome||0));
-    fill("tax",   grow(j.taxExpense||0));
-    fill("int",   Array(YEARS).fill(j.interestExpense||0));
-    fill("dna",   grow(j.depreciationAmortization||0));
-    fill("nwc",   Array(YEARS).fill(j.nwcChange||0));
-    fill("capex", grow(j.capex||0));
-    $("cash").value = j.cash||0;
-    $("debt").value = j.totalDebt||0;
-    $("shares").value = j.sharesOutstandingMillions||1000;
-    if (j.effectiveTaxRate) $("taxRate").value = +(j.effectiveTaxRate*100).toFixed(1);
-    if (j.beta) {
-      const de = val("de"), tr = val("taxRate")/100;
-      $("ub").value = +(j.beta / (1 + (1-tr)*de)).toFixed(3);
-    }
-    msg.className="info";
-    msg.textContent = `ⓘ ${j.companyName} · 최근 연간 실적(${j.period}, 출처: ${j.source}) 기준, 추정 성장률 ${fmt(gr*100,1)}%를 적용해 5개년을 채웠습니다. 각 셀을 직접 수정할 수 있습니다.`;
-    recalc();
-  } catch (e) {
-    msg.className="err";
-    msg.textContent = "데이터 조회 실패: " + e.message;
-  } finally {
-    btn.disabled = false; btn.textContent = "자동 입력";
-  }
-}
-$("fetchBtn").addEventListener("click", fetchData);
-$("ticker").addEventListener("keydown", e => { if (e.key === "Enter") fetchData(); });
-
-/* ── 시킹알파 EPS 붙여넣기 파싱 (토큰 흐름 방식) ──
-   연도('Aug 2026', 'FY2026')를 만나면 그다음에 나오는 첫 순수 숫자를 EPS로 인식.
-   연도와 숫자가 같은 줄이든 다른 줄이든, 제목 줄이 섞여 있든 모두 처리됩니다. */
-function parseEPS(text) {
-  const MONTHS = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
-  const tokens = text.split(/[\t\r\n\s]+/).filter(Boolean);
-  const found = [];
-  let pendingYear = null;
-  for (let k = 0; k < tokens.length; k++) {
-    const tk = tokens[k];
-    const yr = tk.replace(/^FY/i, "");
-    if (/^(19|20)\d{2}$/.test(yr) && ((k > 0 && MONTHS.test(tokens[k-1])) || /^FY/i.test(tk))) {
-      pendingYear = parseInt(yr);
-      continue;
-    }
-    if (pendingYear !== null) {
-      const clean = tk.replace(/,/g, "");
-      if (/%|x$/i.test(clean)) continue;
-      const n = parseFloat(clean);
-      if (isFinite(n)) {
-        if (!found.some(f => f.year === pendingYear)) found.push({ year: pendingYear, eps: n });
-        pendingYear = null;
-      }
-    }
-  }
-  // 월 이름 없이 '2026 73.44' 형식으로 붙여넣은 경우를 위한 예비 인식
-  if (found.length === 0) {
-    let py = null;
-    for (const tk of tokens) {
-      if (/^(19|20)\d{2}$/.test(tk)) { py = parseInt(tk); continue; }
-      if (py !== null) {
-        const clean = tk.replace(/,/g, "");
-        if (/%|x$/i.test(clean)) continue;
-        const n = parseFloat(clean);
-        if (isFinite(n)) {
-          if (!found.some(f => f.year === py)) found.push({ year: py, eps: n });
-          py = null;
-        }
-      }
-    }
-  }
-  found.sort((a,b) => a.year - b.year);
-  return found;
-}
-
-function applyEPS() {
-  const text = $("epsPaste").value;
-  const msg = $("epsMsg");
-  const shares = val("shares");
-  if (!text.trim()) { msg.className="err"; msg.textContent="붙여넣은 내용이 없습니다."; return; }
-  if (!shares || shares <= 0) { msg.className="err"; msg.textContent="발행주식수가 없습니다. 먼저 '자동 입력'을 실행하거나 발행주식수를 입력해 주세요."; return; }
-
-  const found = parseEPS(text);
-  if (found.length === 0) {
-    msg.className="err";
-    msg.textContent="EPS를 인식하지 못했습니다. 연도(Aug 2026 등)와 EPS 숫자가 포함되도록 표를 복사했는지 확인해 주세요.";
-    return;
-  }
-
-  const use = found.slice(0, YEARS);
-  const t = val("taxRate")/100;
-
-  for (let i = 0; i < YEARS; i++) {
-    if (i < use.length) {
-      const ni = +(use[i].eps * shares).toFixed(1);             // 순이익 = EPS × 주식수
-      const tax = t < 1 ? +((ni * t) / (1 - t)).toFixed(1) : 0; // 법인세 = 세전이익 − 순이익
-      $(`ni_${i}`).value = ni;
-      $(`tax_${i}`).value = tax;
-    } else {
-      $(`ni_${i}`).value = $(`ni_${use.length-1}`).value;
-      $(`tax_${i}`).value = $(`tax_${use.length-1}`).value;
-    }
-  }
-  setYearHeaders(Array.from({length: YEARS}, (_,i) =>
-    i < use.length ? use[i].year : use[use.length-1].year + (i - use.length + 1)));
-
-  msg.className="ok";
-  msg.textContent = `✓ ${found.length}개 연도 인식, 앞 ${use.length}개년 적용: ` +
-    use.map(u => `${u.year} EPS $${u.eps}`).join(", ") +
-    ` → 순이익·법인세 교체 완료 (주식수 ${fmt(shares)}백만 주, 세율 ${fmt(t*100,1)}% 기준). CAPEX·감가상각은 직접 조정해 주세요.`;
-  recalc();
-}
-$("epsApplyBtn").addEventListener("click", applyEPS);
-
-recalc();
-</script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="js/dcf.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
