@@ -1,0 +1,97 @@
+[hidden] { display: none !important; }
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --text: #1c2330;
+  --muted: #6b7484;
+  --line: #e3e6eb;
+  --accent: #2456d6;
+  --accent-text: #ffffff;
+  --input-bg: #fff8d6;
+  --input-text: #1a3fae;
+  --good: #11804a;
+  --bad: #c0362c;
+  --warn-bg: #fff3e0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b;
+    --card: #1b2029;
+    --text: #e6e9ef;
+    --muted: #98a1b2;
+    --line: #2d3440;
+    --accent: #5b86f5;
+    --input-bg: #3a3420;
+    --input-text: #a9c3ff;
+    --good: #4cc38a;
+    --bad: #f07167;
+    --warn-bg: #3b2c17;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+.top, main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.top h1 { margin: 8px 0 4px; font-size: 24px; }
+.sub { margin: 0 0 12px; color: var(--muted); }
+.top-actions, .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.card h2 { margin: 0 0 12px; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.card h3 { font-size: 15px; margin: 16px 0 8px; }
+.step { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: 13px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+button {
+  font: inherit; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text);
+  padding: 7px 14px; border-radius: 8px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.mini { padding: 2px 8px; font-size: 12px; }
+select, input { font: inherit; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.drop {
+  border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; cursor: pointer;
+}
+.drop.over, .drop:focus { border-color: var(--accent); outline: none; }
+.drop img { max-width: 100%; max-height: 420px; margin-top: 10px; border-radius: 6px; }
+kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.form-grid input { width: 100%; }
+.form-grid .hint { font-size: 12px; color: var(--muted); }
+.table-scroll { overflow-x: auto; }
+table.grid { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.grid th, .grid td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: right; white-space: nowrap; }
+.grid th:first-child, .grid td:first-child { text-align: left; }
+.grid thead th { color: var(--muted); font-weight: 600; font-size: 13px; }
+.grid input { width: 92px; text-align: right; background: var(--input-bg); color: var(--input-text); border-color: transparent; }
+.grid input.wide { width: 110px; }
+.grid input[type=checkbox] { width: auto; }
+.grid td.calc { color: var(--text); }
+.years td.qf { border-left: 1px solid var(--line); }
+.years td.qf input { width: 64px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.kpi { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.kpi .k { font-size: 12px; color: var(--muted); }
+.kpi .v { font-size: 22px; font-weight: 700; }
+.kpi.main .v { font-size: 28px; color: var(--accent); }
+.pos { color: var(--good); }
+.neg { color: var(--bad); }
+.warn { background: var(--warn-bg); border-radius: 8px; padding: 8px 10px; margin: 6px 0; font-size: 13px; }
+.sens td.base { outline: 2px solid var(--accent); outline-offset: -2px; font-weight: 700; }
+pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 8px; border-radius: 6px; max-height: 260px; overflow: auto; }
+footer { padding: 8px 0 30px; }
+@media (max-width: 600px) {
+  .top h1 { font-size: 20px; }
+  .kpi .v { font-size: 18px; }
+}
+.lookup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.lookup input { font-size: 18px; padding: 8px 12px; width: 220px; text-transform: uppercase; }
+.lookup button { font-size: 17px; padding: 8px 20px; }
+.grid input.assumed { background: transparent; border: 1px dashed var(--bad); color: var(--text); }
+.legend-assumed { border: 1px dashed var(--bad); padding: 0 6px; border-radius: 4px; }
+#hist-wrap { margin-bottom: 14px; }
