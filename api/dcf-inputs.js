@@ -112,10 +112,14 @@ async function fromYahoo(ticker) {
     return null;
   };
   const curPrice = raw(price.regularMarketPrice) || raw(fin.currentPrice) || 0;
-  let shares = M(raw(stats.sharesOutstanding) || 0);
-  if (!shares && curPrice > 0 && raw(price.marketCap)) shares = M(raw(price.marketCap) / curPrice);
-  if (!shares && curPrice > 0 && raw(sdet.marketCap)) shares = M(raw(sdet.marketCap) / curPrice);
-  if (!shares) shares = M(last.annualDilutedAverageShares || 0);
+  // 발행주식수: sharesOutstanding은 GOOGL처럼 주식 종류가 여럿이면 한 종류만 들어 있어서
+  // 전체 주식 기준(impliedSharesOutstanding, 시가총액÷주가)을 먼저 쓴다.
+  const mcap = raw(price.marketCap) || raw(sdet.marketCap);
+  let shares = M(raw(stats.impliedSharesOutstanding) || 0);
+  if (!shares && curPrice > 0 && mcap) shares = M(mcap / curPrice);
+  if (!shares) shares = M(raw(stats.sharesOutstanding) || 0);
+  const diluted = M(last.annualDilutedAverageShares || 0);
+  if (!shares || diluted > shares * 1.2) shares = diluted;
 
   // 차입금: 장기+단기 차입금(리스 제외)을 우선, 없으면 총부채성 차입금
   const ltd = latest("annualLongTermDebt"), cd = latest("annualCurrentDebt");
