@@ -12,6 +12,7 @@
   const COMMON = [
     { key: 'ticker', label: '종목 (티커)', type: 'text' },
     { key: 'baseFY', label: '0년차 회계연도 (최근 실적)', type: 'int', hint: '예: 2025 → 1년차 = FY2026' },
+    { key: 'horizon', label: '예측 기간 (년, 1~10)', type: 'int', hint: '추정치가 있는 마지막 해까지 자동. 그 다음 해부터 영구가치' },
     { key: 'price', label: '현재 주가 ($)', type: 'num' },
     { key: 'shares', label: '발행주식수 (백만 주)', type: 'num' },
     { key: 'cash', label: '보유현금+단기투자 (백만 $)', type: 'num' },
@@ -33,7 +34,7 @@
     return {
       ticker: '', baseFY: new Date().getFullYear() - 1, price: 0, shares: 0, cash: 0, debt: 0,
       tax: 0.21, wacc: 0.08, g: 0.02, normCapex: 0.05, normDA: 0.05,
-      beta: 0, rf: 0.042, erp: 0.05, sbcOn: false, sbc: 0,
+      beta: 0, rf: 0.042, erp: 0.05, sbcOn: false, sbc: 0, horizon: 10,
       revenue: arr(0), growth: arr(0.05), margin: arr(0.2), da: arr(0.05), capex: arr(0.05), nwc: arr(0),
     };
   }
@@ -101,7 +102,8 @@
     else if (f.type === 'text') state[key] = e.target.value.toUpperCase();
     else if (f.type === 'int') state[key] = parseInt(e.target.value, 10) || 0;
     else state[key] = fromInput(e.target.value, f.type === 'pct');
-    if (key === 'baseFY') renderYears(); // 회계연도 라벨 갱신
+    if (key === 'horizon') state.horizon = Math.max(1, Math.min(N, state.horizon || 1));
+    if (key === 'baseFY' || key === 'horizon') renderYears(); // 회계연도 라벨·사용 범위 갱신
     recalc();
   });
 
@@ -122,11 +124,13 @@
     });
     s.revenue[0] = last.revenue;
     s.revAssumed = Array(N + 1).fill(false);
+    // 예측 기간 = 컨센서스가 있는 마지막 해 (없으면 5년, 임시 가정)
     let known = 0;
     for (const e of j.estimates) {
       const t = e.fy - last.fy;
       if (t >= 1 && t <= 5 && t === known + 1) { s.revenue[t] = e.revenue; known = t; }
     }
+    s.horizon = known || 5;
     const prev = h.length > 1 ? h[h.length - 2].revenue : null;
     const gStart = known ? s.revenue[known] / s.revenue[known - 1] - 1 : prev ? last.revenue / prev - 1 : 0.05;
     for (let t = known + 1; t <= N; t++) {
@@ -163,10 +167,10 @@
       lastLookup = j;
       renderAll();
       renderHistory(j);
-      const n = j.estimates.filter(e => e.fy - state.baseFY <= 5).length;
-      const assumed = state.revAssumed.map((a, t) => (a ? t : 0)).filter(Boolean);
-      st.innerHTML = `${esc(j.companyName)} · 컨센서스 ${n}개 연도 반영` +
-        (assumed.length ? ` · <span class="legend-assumed">${assumed[0]}~${assumed[assumed.length - 1]}년차 매출은 임시 가정</span>, 시킹알파 캡처로 바꾸세요` : '');
+      const assumed = state.revAssumed.map((a, t) => (a && t <= state.horizon ? t : 0)).filter(Boolean);
+      st.innerHTML = `${esc(j.companyName)} · FY${state.baseFY + state.horizon}까지 ${state.horizon}년 예측 (애널리스트 컨센서스)` +
+        (assumed.length ? ` · <span class="legend-assumed">${assumed[0]}~${assumed[assumed.length - 1]}년차 매출은 임시 가정</span>` : '') +
+        ' · 시킹알파 매출 추정치 캡처를 올리면 그 마지막 해까지 늘어납니다';
       try { history.replaceState(null, '', '?t=' + encodeURIComponent(ticker)); } catch (e) { /* ignore */ }
     } catch (err) {
       st.textContent = '자동 조회 실패: ' + err.message;
@@ -214,7 +218,8 @@
   function renderYears() {
     const fy = t => 'FY' + (state.baseFY + t);
     let h = '<thead><tr><th></th>';
-    for (let t = 0; t <= N; t++) h += `<th>${t === 0 ? '0년차 실적' : t + '년차'}<br><span class="muted small">${fy(t)}</span></th>`;
+    const off = t => (t > state.horizon ? ' class="off"' : '');
+    for (let t = 0; t <= N; t++) h += `<th${off(t)}>${t === 0 ? '0년차 실적' : t + '년차'}<br><span class="muted small">${t > state.horizon ? '미사용' : fy(t)}</span></th>`;
     h += '<th class="qf">한 번에 넣기</th></tr></thead><tbody>';
 
     // 성장률
@@ -265,10 +270,19 @@
     recalc();
   });
 
+  // 10년으로 연장: 추정치가 있는 마지막 해의 성장률에서 영구성장률까지 10년차에 걸쳐 직선으로 낮춘다
   $('#btn-fade').addEventListener('click', () => {
-    const g5 = state.revenue[5] / state.revenue[4] - 1;
-    if (!Number.isFinite(g5)) return;
-    for (let k = 1; k <= 5; k++) state.growth[5 + k] = +(g5 + (state.g - g5) * k / 6).toFixed(4);
+    let tl = 0;
+    for (let t = 1; t <= 5; t++) if (state.revenue[t] > 0 && (state.revAssumed ? !state.revAssumed[t] : true) && t <= Math.max(state.horizon, 1)) tl = t;
+    if (!tl || !(state.revenue[tl - 1] > 0)) return;
+    const g0 = state.revenue[tl] / state.revenue[tl - 1] - 1;
+    for (let t = tl + 1; t <= N; t++) {
+      const gt = +(g0 + (state.g - g0) * (t - tl) / (N - tl + 1)).toFixed(4);
+      if (t <= 5) { state.revenue[t] = Math.round(state.revenue[t - 1] * (1 + gt)); if (state.revAssumed) state.revAssumed[t] = true; }
+      else state.growth[t] = gt;
+    }
+    state.horizon = N;
+    renderCommon();
     renderYears();
     recalc();
   });
@@ -279,7 +293,7 @@
     const warn = [];
     if (state.wacc <= state.g) warn.push('할인율이 영구성장률보다 커야 합니다.');
     if (!state.shares) warn.push('발행주식수를 넣어주세요.');
-    for (let t = 0; t <= 5; t++) if (!state.revenue[t]) { warn.push(`${t}년차 매출이 비어 있습니다.`); break; }
+    for (let t = 0; t <= Math.min(5, state.horizon); t++) if (!state.revenue[t]) { warn.push(`${t}년차 매출이 비어 있습니다.`); break; }
 
     const inp = modelInput();
     const r = DCF.compute(inp);
@@ -287,10 +301,10 @@
     $('#capm').innerHTML = c == null ? '' :
       `CAPM 자기자본비용 = ${pct(state.rf)} + 베타 ${(+state.beta).toFixed(2)} × ${pct(state.erp)} = <b>${pct(c)}</b> ` +
       `<button class="mini ghost">할인율에 넣기</button> <span class="muted">(차입금이 많으면 WACC는 이보다 조금 낮습니다)</span>`;
-    const revG = ok0() ? DCF.reverse(inp, 'growth') : null;
+    const revG = ok0() ? DCF.reverse(inp, 'g') : null;
     const revM = ok0() ? DCF.reverse(inp, 'margin') : null;
-    for (let t = 1; t <= 5; t++) { const el = $('#g-' + t); if (el) el.textContent = pct(r.rows[t - 1].growth); }
-    for (let t = 6; t <= N; t++) { const el = $('#rev-' + t); if (el) el.textContent = fmt(r.rows[t - 1].revenue); }
+    for (let t = 1; t <= 5; t++) { const el = $('#g-' + t); if (el) el.textContent = r.rows[t - 1] ? pct(r.rows[t - 1].growth) : pct(state.revenue[t] / state.revenue[t - 1] - 1); }
+    for (let t = 6; t <= N; t++) { const el = $('#rev-' + t); if (el) el.textContent = r.rows[t - 1] ? fmt(r.rows[t - 1].revenue) : '–'; }
 
     const ok = !warn.length;
     const up = r.upside;
@@ -303,8 +317,9 @@
       kpi('1~10년 FCFF 현재가치 합', fmt(r.pvSum)) +
       kpi('영구가치 현재가치', fmt(r.pvTv)) +
       kpi('EV 중 영구가치 비중', pct(r.tvShare)) +
-      kpi('현재가가 가정하는 6~10년차 성장률', revG == null ? '범위 밖' : pct(revG)) +
-      kpi('현재가가 가정하는 영업이익률 (1~10년차)', revM == null ? '범위 밖' : pct(revM));
+      kpi(`예측 기간`, `${r.horizon}년 <span class="muted small">(~FY${state.baseFY + r.horizon})</span>`) +
+      kpi('현재가가 가정하는 영구성장률', revG == null ? '범위 밖' : pct(revG)) +
+      kpi(`현재가가 가정하는 영업이익률 (1~${r.horizon}년차)`, revM == null ? '범위 밖' : pct(revM));
 
     const lines = [
       ['매출액', 'revenue'], ['성장률', 'growth', true], ['영업이익 (EBIT)', 'ebit'], ['법인세', 'taxes'],
@@ -583,11 +598,14 @@
     drawEstRows();
   });
   $('#btn-apply').addEventListener('click', () => {
-    let n = 0;
+    let n = 0, maxT = 0;
     for (const e of estimates) {
       const t = slotFor(e.year);
-      if (e.use && t && e.value > 0) { state.revenue[t] = e.value; if (state.revAssumed) state.revAssumed[t] = false; n++; }
+      if (e.use && t && e.value > 0) { state.revenue[t] = e.value; if (state.revAssumed) state.revAssumed[t] = false; n++; maxT = Math.max(maxT, t); }
     }
+    // 예측 기간 = 추정치가 있는 마지막 해 (10년으로 늘려 둔 경우는 유지)
+    if (maxT && state.horizon <= 5) state.horizon = maxT;
+    renderCommon();
     renderYears();
     recalc();
     $('#ocr-status').textContent = `매출 ${n}개를 넣었습니다.`;
@@ -609,7 +627,8 @@
     const ws = wb.addWorksheet('DCF');
     const inp = modelInput();
     const r = DCF.compute(inp);
-    const cols = 'BCDEFGHIJKL'.split('');
+    const cols = 'BCDEFGHIJKL'.split('').slice(0, r.horizon + 1);
+    const L = cols[cols.length - 1]; // 예측 마지막 해 열
     const inputStyle = c => {
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
       c.font = { color: { argb: 'FF0000FF' } };
@@ -638,7 +657,7 @@
     ];
     for (const [row, label, v, nf] of common) { put('A' + row, label); put('B' + row, v, nf, true); }
 
-    put('A15', '2. 연도별 가정 및 현금흐름 (B열 = 0년차 실적, C~G = 1~5년차, H~L = 6~10년차)').font = { bold: true };
+    put('A15', `2. 연도별 가정 및 현금흐름 (B열 = 0년차 실적, C~${L} = 1~${r.horizon}년차 예측)`).font = { bold: true };
     put('A16', '연차'); put('A17', '회계연도');
     cols.forEach((c, t) => { put(c + '16', t === 0 ? '0년차' : t + '년차'); put(c + '17', 'FY' + (state.baseFY + t), null, true); });
 
@@ -675,10 +694,10 @@
 
     put('A35', '3. 가치평가').font = { bold: true };
     const val = [
-      [36, 'FCFF 현재가치 합계 (1~10년차)', 'SUM(C33:L33)', r.pvSum, NUM, '10년치 PV 합'],
-      [37, '영구가치 기준 FCFF (11년차, 정상화)', 'L19*(1+B7)*(L20*(1-B5)+B9-B8-B14)-L19*B7*L23', r.fcf11, NUM, '11년차 매출 × (세후이익률 + 정상화 D&A − 정상화 캐펙스 − SBC) − 운전자본'],
+      [36, `FCFF 현재가치 합계 (1~${r.horizon}년차)`, `SUM(C33:${L}33)`, r.pvSum, NUM, `${r.horizon}년치 PV 합`],
+      [37, `영구가치 기준 FCFF (${r.horizon + 1}년차, 정상화)`, `${L}19*(1+B7)*(${L}20*(1-B5)+B9-B8-B14)-${L}19*B7*${L}23`, r.fcf11, NUM, '다음 해 매출 × (세후이익률 + 정상화 D&A − 정상화 캐펙스 − SBC) − 운전자본'],
       [38, '영구가치 (Terminal Value)', 'B37/(B6-B7)', r.tv, NUM, 'FCF11 / (WACC − g)'],
-      [39, '영구가치의 현재가치', 'B38*L32', r.pvTv, NUM, '10년차 할인계수 적용'],
+      [39, '영구가치의 현재가치', `B38*${L}32`, r.pvTv, NUM, `${r.horizon}년차 할인계수 적용`],
       [40, '기업가치 (Enterprise Value)', 'B36+B39', r.ev, NUM],
       [41, '차감: 총차입금', '-B12', -state.debt, NUM],
       [42, '가산: 보유현금', 'B11', state.cash, NUM],

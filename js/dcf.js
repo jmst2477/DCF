@@ -9,13 +9,15 @@
   // inputs:
   //   tax, wacc, g, normCapex, normDA, shares, cash, debt, price
   //   sbc             주식보상비용/매출 (0이면 미반영) — FCFF와 영구가치에서 차감
+  //   horizon         명시적 예측 기간(1~10년, 기본 10). 그 다음 해부터 영구가치
   //   revenue[0..5]   0년차 실적 + 1~5년차 추정 매출
   //   growth[6..10]   6~10년차 성장률
   //   margin/da/capex/nwc[1..10] 연도별 비율
   function compute(inp) {
+    const H = Math.max(1, Math.min(YEARS, Math.round(inp.horizon || YEARS)));
     const rev = [];
     const growth = [];
-    for (let t = 0; t <= YEARS; t++) {
+    for (let t = 0; t <= H; t++) {
       if (t <= EST_YEARS) {
         rev[t] = num(inp.revenue[t]);
         growth[t] = t === 0 ? null : rev[t] / rev[t - 1] - 1;
@@ -27,7 +29,7 @@
 
     const rows = [];
     let pvSum = 0;
-    for (let t = 1; t <= YEARS; t++) {
+    for (let t = 1; t <= H; t++) {
       const ebit = rev[t] * num(inp.margin[t]);
       const taxes = ebit * inp.tax;
       const nopat = ebit - taxes;
@@ -42,11 +44,11 @@
       rows.push({ t, revenue: rev[t], growth: growth[t], ebit, taxes, nopat, da, capex, dNwc, sbc, fcff, df, pv });
     }
 
-    const last = rows[YEARS - 1];
-    // B37: FCF11 = L19×(1+g)×(L20×(1−tax)+정상화D&A−정상화CapEx) − L19×g×L23
-    const fcf11 = rev[YEARS] * (1 + inp.g) * (num(inp.margin[YEARS]) * (1 - inp.tax) + inp.normDA - inp.normCapex)
-      - rev[YEARS] * inp.g * num(inp.nwc[YEARS])
-      - rev[YEARS] * (1 + inp.g) * num(inp.sbc);
+    const last = rows[H - 1];
+    // 영구가치 기준 FCF (예측 마지막 해 H의 다음 해):
+    //   매출H×(1+g)×(이익률H×(1−세율)+정상화D&A−정상화CapEx−SBC) − 매출H×g×운전자본%H
+    const fcf11 = rev[H] * (1 + inp.g) * (num(inp.margin[H]) * (1 - inp.tax) + inp.normDA - inp.normCapex - num(inp.sbc))
+      - rev[H] * inp.g * num(inp.nwc[H]);
     const tv = fcf11 / (inp.wacc - inp.g);
     const pvTv = tv * last.df;
     const ev = pvSum + pvTv;
@@ -54,7 +56,7 @@
     const perShare = equity / inp.shares;
     const upside = inp.price ? perShare / inp.price - 1 : null;
 
-    return { rows, rev0: rev[0], pvSum, fcf11, tv, pvTv, ev, equity, perShare, upside, tvShare: pvTv / ev };
+    return { horizon: H, rows, rev0: rev[0], pvSum, fcf11, tv, pvTv, ev, equity, perShare, upside, tvShare: pvTv / ev };
   }
 
   // WACC × 영구성장률 민감도 표 (주당가치)
@@ -63,16 +65,16 @@
   }
 
   // 역DCF: 1주당 가치가 현재가와 같아지는 값을 이분법으로 찾는다.
-  //   kind 'growth' → 6~10년차 성장률(모두 같은 값), 'margin' → 1~10년차 영업이익률(모두 같은 값)
+  //   kind 'g' → 영구성장률, 'margin' → 1~10년차 영업이익률(모두 같은 값)
   function reverse(inp, kind) {
     if (!inp.price || !inp.shares) return null;
     const apply = x => {
       const c = Object.assign({}, inp);
-      if (kind === 'growth') { c.growth = inp.growth.slice(); for (let t = EST_YEARS + 1; t <= YEARS; t++) c.growth[t] = x; }
+      if (kind === 'g') c.g = x;
       else { c.margin = inp.margin.slice(); for (let t = 1; t <= YEARS; t++) c.margin[t] = x; }
       return compute(c).perShare - inp.price;
     };
-    let lo = kind === 'growth' ? -0.3 : -0.5, hi = kind === 'growth' ? 1.0 : 0.9;
+    let lo = kind === 'g' ? -0.1 : -0.5, hi = kind === 'g' ? inp.wacc - 0.0005 : 0.9;
     let flo = apply(lo), fhi = apply(hi);
     if (!Number.isFinite(flo) || !Number.isFinite(fhi) || flo * fhi > 0) return null;
     for (let i = 0; i < 60; i++) {

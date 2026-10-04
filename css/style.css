@@ -95,3 +95,4 @@ footer { padding: 8px 0 30px; }
 .grid input.assumed { background: transparent; border: 1px dashed var(--bad); color: var(--text); }
 .legend-assumed { border: 1px dashed var(--bad); padding: 0 6px; border-radius: 4px; }
 #hist-wrap { margin-bottom: 14px; }
+.years th.off { opacity: .45; }
