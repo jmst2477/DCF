@@ -142,7 +142,11 @@
     s.margin = Array(N + 1).fill(margin);
     s.da = Array(N + 1).fill(last.daPct || 0);
     s.capex = Array(N + 1).fill(last.capexPct || 0);
-    const nwc = last.nwcPct != null ? Math.max(-0.2, Math.min(0.5, last.nwcPct)) : 0;
+    // 금융 자회사 채권(예: CAT 파이낸셜)이 매출채권에 섞이면 비율이 비정상적으로 커지므로 20%로 제한
+    const NWC_CAP = 0.2;
+    const nwcRaw = last.nwcPct != null ? last.nwcPct : 0;
+    const nwc = Math.max(-0.1, Math.min(NWC_CAP, nwcRaw));
+    s.nwcNote = nwcRaw > NWC_CAP ? `운전자본/매출이 ${(nwcRaw * 100).toFixed(1)}%로 높게 나와 20%로 제한했습니다 (금융 자회사 채권이 섞였을 수 있음). 필요하면 고치세요.` : '';
     s.nwc = Array(N + 1).fill(+nwc.toFixed(4));
     s.beta = j.beta || 0;
     s.sbc = last.sbcPct || 0;
@@ -170,7 +174,8 @@
       const assumed = state.revAssumed.map((a, t) => (a && t <= state.horizon ? t : 0)).filter(Boolean);
       st.innerHTML = `${esc(j.companyName)} · FY${state.baseFY + state.horizon}까지 ${state.horizon}년 예측 (애널리스트 컨센서스)` +
         (assumed.length ? ` · <span class="legend-assumed">${assumed[0]}~${assumed[assumed.length - 1]}년차 매출은 임시 가정</span>` : '') +
-        ' · 시킹알파 매출 추정치 캡처를 올리면 그 마지막 해까지 늘어납니다';
+        ' · 시킹알파 매출 추정치 캡처를 올리면 그 마지막 해까지 늘어납니다' +
+        (state.nwcNote ? `<br><span class="neg">${esc(state.nwcNote)}</span>` : '');
       try { history.replaceState(null, '', '?t=' + encodeURIComponent(ticker)); } catch (e) { /* ignore */ }
     } catch (err) {
       st.textContent = '자동 조회 실패: ' + err.message;
@@ -218,13 +223,13 @@
   function renderYears() {
     const fy = t => 'FY' + (state.baseFY + t);
     let h = '<thead><tr><th></th>';
-    const off = t => (t > state.horizon ? ' class="off"' : '');
-    for (let t = 0; t <= N; t++) h += `<th${off(t)}>${t === 0 ? '0년차 실적' : t + '년차'}<br><span class="muted small">${t > state.horizon ? '미사용' : fy(t)}</span></th>`;
+    const H = Math.max(1, Math.min(N, state.horizon || 1)); // 예측 기간까지만 보여줌
+    for (let t = 0; t <= H; t++) h += `<th>${t === 0 ? '0년차 실적' : t + '년차'}<br><span class="muted small">${fy(t)}</span></th>`;
     h += '<th class="qf">한 번에 넣기</th></tr></thead><tbody>';
 
     // 성장률
     h += '<tr><td>매출 성장률</td>';
-    for (let t = 0; t <= N; t++) {
+    for (let t = 0; t <= H; t++) {
       if (t === 0) h += '<td></td>';
       else if (t <= 5) h += `<td class="calc" id="g-${t}"></td>`;
       else h += `<td><input data-y="growth" data-t="${t}" data-pct="1" type="number" step="any" value="${toInput(state.growth[t], true)}"></td>`;
@@ -232,8 +237,8 @@
     h += '<td class="qf"></td></tr>';
 
     // 매출
-    h += '<tr><td><b>매출액</b> <span class="muted small">(1~5년차 = 시킹알파)</span></td>';
-    for (let t = 0; t <= N; t++) {
+    h += '<tr><td><b>매출액</b> <span class="muted small">(추정치)</span></td>';
+    for (let t = 0; t <= H; t++) {
       const assumed = state.revAssumed && state.revAssumed[t];
       if (t <= 5) h += `<td><input class="wide${assumed ? ' assumed' : ''}" data-y="revenue" data-t="${t}" type="number" step="any" value="${state.revenue[t]}"${assumed ? ' title="임시 가정값 - 시킹알파 추정치로 바꾸세요"' : ''}></td>`;
       else h += `<td class="calc" id="rev-${t}"></td>`;
@@ -242,7 +247,7 @@
 
     for (const r of YEAR_ROWS) {
       h += `<tr><td>${r.label} (%)</td>`;
-      for (let t = 0; t <= N; t++) {
+      for (let t = 0; t <= H; t++) {
         if (t === 0) { h += `<td class="muted">${r.key === 'nwc' ? '' : pct(state[r.key][0])}</td>`; continue; }
         h += `<td><input data-y="${r.key}" data-t="${t}" data-pct="1" type="number" step="any" value="${toInput(state[r.key][t], true)}"></td>`;
       }
@@ -265,24 +270,7 @@
     const inp = $(`[data-qf="${key}"]`);
     if (inp.value === '') return;
     const v = fromInput(inp.value, true);
-    for (let t = 1; t <= N; t++) state[key][t] = v;
-    renderYears();
-    recalc();
-  });
-
-  // 10년으로 연장: 추정치가 있는 마지막 해의 성장률에서 영구성장률까지 10년차에 걸쳐 직선으로 낮춘다
-  $('#btn-fade').addEventListener('click', () => {
-    let tl = 0;
-    for (let t = 1; t <= 5; t++) if (state.revenue[t] > 0 && (state.revAssumed ? !state.revAssumed[t] : true) && t <= Math.max(state.horizon, 1)) tl = t;
-    if (!tl || !(state.revenue[tl - 1] > 0)) return;
-    const g0 = state.revenue[tl] / state.revenue[tl - 1] - 1;
-    for (let t = tl + 1; t <= N; t++) {
-      const gt = +(g0 + (state.g - g0) * (t - tl) / (N - tl + 1)).toFixed(4);
-      if (t <= 5) { state.revenue[t] = Math.round(state.revenue[t - 1] * (1 + gt)); if (state.revAssumed) state.revAssumed[t] = true; }
-      else state.growth[t] = gt;
-    }
-    state.horizon = N;
-    renderCommon();
+    for (let t = 1; t <= N; t++) state[key][t] = v; // 모든 연도 (예측 기간이 늘어날 때 대비)
     renderYears();
     recalc();
   });

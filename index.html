@@ -79,12 +79,9 @@
   <!-- 3. 연도별 가정 -->
   <section class="card">
     <h2><span class="step">3</span> 연도별 가정</h2>
-    <p class="muted small">노란 칸이 입력 칸입니다. 1~5년차 매출은 시킹알파 추정치, 6~10년차는 성장률로 계산합니다. 예측 기간 밖의 연도(흐린 칸)는 계산에 쓰이지 않습니다. 각 행 오른쪽 칸에 값을 넣고 <b>전체</b>를 누르면 1~10년차에 한 번에 들어갑니다.</p>
+    <p class="muted small">노란 칸이 입력 칸입니다. 매출 추정치(시킹알파 캡처 또는 애널리스트 컨센서스)가 있는 해까지만 계산하고, 그다음 해부터는 영구가치로 잡습니다. 각 행 오른쪽 칸에 값을 넣고 <b>전체</b>를 누르면 모든 연도에 한 번에 들어갑니다.</p>
     <div class="table-scroll">
       <table id="years" class="grid years"></table>
-    </div>
-    <div class="row">
-      <button id="btn-fade" class="ghost">10년으로 연장 (추정치 이후 성장률을 영구성장률까지 점점 낮춤)</button>
     </div>
   </section>
 
