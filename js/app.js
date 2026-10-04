@@ -680,38 +680,75 @@
   pdfDrop.addEventListener('drop', e => { e.preventDefault(); pdfDrop.classList.remove('over'); handlePdfs(e.dataTransfer.files); });
 
   // ---------- 1. 캡처 업로드 & 읽기 ----------
-  let currentImage = null; // {blob, dataUrl}
+  // 캡처 칸 2개: ① EPS 표, ② 매출 표. 칸마다 따로 읽고, 읽은 값은 아래 표 하나에 모읍니다.
   let estimates = [];
+  const SLOT_KO = { eps: 'EPS 표', revenue: '매출 표' };
+  const slots = [...document.querySelectorAll('.drop[data-slot]')];
+  let pasteSlot = null; // 마지막으로 누르거나 가리킨 칸 (Ctrl+V 대상)
 
-  const drop = $('#drop');
-  drop.addEventListener('click', e => { if (e.target.id !== 'preview') $('#file').click(); });
-  drop.addEventListener('keydown', e => { if (e.key === 'Enter') $('#file').click(); });
-  $('#file').addEventListener('change', e => e.target.files[0] && setImage(e.target.files[0]));
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', e => {
-    e.preventDefault(); drop.classList.remove('over');
-    const files = [...e.dataTransfer.files];
-    if (files.some(x => x.type === 'application/pdf')) { handlePdfs(files); return; } // 재무제표 PDF를 여기 놓아도 처리
-    const f = files.find(x => x.type.startsWith('image/'));
-    if (f) setImage(f);
-  });
+  for (const drop of slots) {
+    const input = drop.querySelector('input[type=file]');
+    drop.addEventListener('click', () => { pasteSlot = drop; input.click(); });
+    drop.addEventListener('focus', () => { pasteSlot = drop; });
+    drop.addEventListener('mouseenter', () => { pasteSlot = drop; });
+    drop.addEventListener('keydown', e => { if (e.key === 'Enter') input.click(); });
+    input.addEventListener('change', e => { if (e.target.files[0]) setImage(drop, e.target.files[0]); e.target.value = ''; });
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => {
+      e.preventDefault(); drop.classList.remove('over');
+      const files = [...e.dataTransfer.files];
+      if (files.some(x => x.type === 'application/pdf')) { handlePdfs(files); return; } // 재무제표 PDF를 여기 놓아도 처리
+      const f = files.find(x => x.type.startsWith('image/'));
+      if (f) setImage(drop, f);
+    });
+  }
   document.addEventListener('paste', e => {
     const item = [...(e.clipboardData || {}).items || []].find(x => x.type.startsWith('image/'));
-    if (item) { e.preventDefault(); setImage(item.getAsFile()); }
+    if (!item) return;
+    e.preventDefault();
+    // 칸을 누르거나 가리킨 적이 없으면 비어 있는 첫 칸에 넣음
+    const target = pasteSlot || slots.find(d => !d.image) || slots[0];
+    setImage(target, item.getAsFile());
   });
 
-  function setImage(blob) {
+  function setImage(drop, blob) {
     const reader = new FileReader();
     reader.onload = () => {
-      currentImage = { blob, dataUrl: reader.result };
-      const img = $('#preview');
+      drop.image = { blob, dataUrl: reader.result };
+      const img = drop.querySelector('.preview');
       img.src = reader.result;
       img.hidden = false;
-      $('#btn-ocr').hidden = false;
-      $('#btn-ocr').click(); // 올리자마자 바로 읽음
+      readSlot(drop); // 올리자마자 바로 읽음
     };
     reader.readAsDataURL(blob);
+  }
+
+  async function readSlot(drop) {
+    const slot = drop.dataset.slot;
+    const status = drop.parentElement.querySelector('.slot-status');
+    try {
+      let result;
+      if (modeSel.value === 'claude') {
+        status.textContent = 'Claude가 이미지를 읽는 중...';
+        result = await readWithClaude(drop.image);
+      } else {
+        status.textContent = 'OCR 준비 중... (처음 한 번은 언어 데이터를 내려받느라 조금 걸립니다)';
+        const text = await readWithTesseract(drop.image, p => { status.textContent = p; });
+        result = SAParser.parseEstimates(text, slot);
+        result.text = text;
+      }
+      // 이 칸에서 전에 읽은 값은 지우고 새로 읽은 값으로 바꿈
+      const found = result.estimates.map(x => Object.assign({ use: true, slot }, x, { metric: x.metric || slot }));
+      estimates = estimates.filter(e => e.slot !== slot && !found.some(f => f.metric === e.metric && f.year === e.year)).concat(found);
+      renderEstimates((result.warnings || []).map(w => `${SLOT_KO[slot]}: ${w}`), result.text || '');
+      const n = found.filter(e => e.metric === slot).length;
+      status.textContent = n ? `${SAParser.METRIC_KO[slot]} ${n}개를 읽었습니다.` : found.length ? `읽었지만 ${SAParser.METRIC_KO[slot]} 표가 아닌 것 같습니다. 아래 표에서 확인하세요.` : '표를 읽지 못했습니다.';
+      $('#ocr-status').textContent = estimates.length ? `추정치 ${estimates.length}개를 찾았습니다. 확인하고 "계산에 반영"을 누르세요.` : '';
+    } catch (err) {
+      console.error(err);
+      status.textContent = '읽기 실패: ' + (err.message || err);
+    }
   }
 
   // OCR 방식 선택
@@ -724,33 +761,6 @@
   modeSel.addEventListener('change', syncMode);
   try { $('#api-key').value = localStorage.getItem(KEY_STORE) || ''; } catch (e) { /* ignore */ }
   $('#api-key').addEventListener('change', e => { try { localStorage.setItem(KEY_STORE, e.target.value.trim()); } catch (x) { /* ignore */ } });
-
-  $('#btn-ocr').addEventListener('click', async () => {
-    if (!currentImage) return;
-    const btn = $('#btn-ocr');
-    btn.disabled = true;
-    const status = $('#ocr-status');
-    try {
-      let result;
-      if (modeSel.value === 'claude') {
-        status.textContent = 'Claude가 이미지를 읽는 중...';
-        result = await readWithClaude(currentImage);
-      } else {
-        status.textContent = 'OCR 준비 중... (처음 한 번은 언어 데이터를 내려받느라 조금 걸립니다)';
-        const text = await readWithTesseract(currentImage, p => { status.textContent = p; });
-        result = SAParser.parseEstimates(text);
-        result.text = text;
-      }
-      estimates = result.estimates.map(x => Object.assign({ use: true }, x));
-      renderEstimates(result.warnings || [], result.text || '');
-      status.textContent = estimates.length ? `추정치 ${estimates.length}개를 찾았습니다. 확인하고 "계산에 반영"을 누르세요.` : '추정치를 찾지 못했습니다.';
-    } catch (err) {
-      console.error(err);
-      status.textContent = '읽기 실패: ' + (err.message || err);
-    } finally {
-      btn.disabled = false;
-    }
-  });
 
   // 스크린샷 전처리: 확대 + 흑백 + (다크모드면) 반전 → Tesseract 인식률 개선
   function preprocess(dataUrl) {
@@ -782,14 +792,15 @@
   }
 
   let workerPromise = null;
-  function getWorker(onProgress) {
+  let ocrProgress = () => {}; // 지금 읽고 있는 칸의 진행 표시
+  function getWorker() {
     if (!workerPromise) {
       workerPromise = Tesseract.createWorker('eng', 1, {
         workerPath: CDN + 'tesseract.js@5.1.1/dist/worker.min.js',
         corePath: CDN + 'tesseract.js-core@5.1.1',
         langPath: CDN + '@tesseract.js-data/eng@1.0.0/4.0.0_best_int',
         logger: m => {
-          if (m.status && typeof m.progress === 'number') onProgress(`OCR: ${m.status} ${Math.round(m.progress * 100)}%`);
+          if (m.status && typeof m.progress === 'number') ocrProgress(`OCR: ${m.status} ${Math.round(m.progress * 100)}%`);
         },
       }).then(async w => {
         await w.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
@@ -802,8 +813,10 @@
 
   async function readWithTesseract(image, onProgress) {
     const canvas = await preprocess(image.dataUrl);
-    const worker = await getWorker(onProgress);
+    ocrProgress = onProgress;
+    const worker = await getWorker();
     const { data } = await worker.recognize(canvas);
+    ocrProgress = () => {};
     return data.text;
   }
 

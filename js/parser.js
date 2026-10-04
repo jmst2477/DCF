@@ -82,11 +82,11 @@
   }
 
   // 결과: [{metric, year, label, value(백만 달러), raw, source:'row'|'column'}], 항목·연도 순
-  function parseEstimates(text) {
+  function parseEstimates(text, hint) {
     const all = clean(text).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const warnings = [];
     const out = [];
-    for (const sec of sections(all)) {
+    for (const sec of sections(all, hint)) {
       let found = sec.metric === 'eps' ? parseEpsRows(sec.lines) : parseRows(sec.lines);
       if (found.length < 2 && sec.metric !== 'eps') {
         const col = parseColumns(sec.lines);
@@ -102,22 +102,22 @@
       if (dup) warnings.push(`${METRIC_KO[sec.metric]}: 같은 연도가 여러 번 나왔습니다. Quarterly(분기)가 아니라 Annual(연간) 화면인지 확인하세요. 연도별 첫 값만 사용했습니다.`);
       out.push(...[...byYear.values()].sort((a, b) => a.year - b.year));
     }
-    if (out.length && !out.some(e => e.metric === 'revenue') && out.every(e => e.metric === 'eps')) {
+    if (!hint && out.length && !out.some(e => e.metric === 'revenue') && out.every(e => e.metric === 'eps')) {
       warnings.push('EPS만 읽었습니다. 같은 화면의 매출(Revenue) 표도 함께 캡처하면 EPS로 연도별 이익률을 추정합니다.');
     }
     if (!out.length) {
-      warnings.push(looksLikeEps(all)
+      warnings.push(hint ? '표를 읽지 못했습니다. 표가 잘 보이게 다시 캡처하거나 아래 행 추가로 값을 직접 넣으세요.' : looksLikeEps(all)
         ? 'EPS(주당순이익) 추정치 표를 캡처하셨습니다. 같은 Earnings → Estimates 화면에서 아래로 내려 "Revenue Estimates"(매출 추정치) 표를 캡처해 주세요. 매출 값은 1.92B처럼 B/M 단위가 붙어 있습니다.'
         : '추정치를 찾지 못했습니다. 표가 잘 보이게 다시 캡처하거나 값을 직접 입력하세요.');
     }
     return { estimates: out, warnings, lines: all };
   }
 
-  // 표 제목 줄로 구간을 나눔. 제목이 하나도 없으면 전체를 매출 표로 봄 (예전 동작)
-  function sections(lines) {
+  // 표 제목 줄로 구간을 나눔. 제목이 하나도 없으면 전체를 hint 표(없으면 매출 표)로 봄
+  function sections(lines, hint) {
     const heads = [];
     lines.forEach((l, i) => { const m = metricOf(l); if (m !== undefined) heads.push({ i, metric: m }); });
-    if (!heads.length) return [{ metric: 'revenue', lines }];
+    if (!heads.length) return [{ metric: hint || 'revenue', lines }];
     const secs = [];
     heads.forEach((h, k) => {
       if (!h.metric) return;
