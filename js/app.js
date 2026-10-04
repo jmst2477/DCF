@@ -21,6 +21,11 @@
     { key: 'g', label: '영구성장률 (%)', type: 'pct', hint: '할인율보다 작아야 합니다' },
     { key: 'normCapex', label: '정상화 캐펙스/매출 (%)', type: 'pct', hint: '영구가치 계산에만 사용' },
     { key: 'normDA', label: '정상화 감가상각비/매출 (%)', type: 'pct', hint: '영구가치 계산에만 사용' },
+    { key: 'beta', label: '베타 (CAPM 참고용)', type: 'num' },
+    { key: 'rf', label: '무위험이자율 (%, CAPM)', type: 'pct', hint: '미국 10년 국채 금리' },
+    { key: 'erp', label: '시장위험프리미엄 (%, CAPM)', type: 'pct', hint: '보통 4~6%' },
+    { key: 'sbcOn', label: 'SBC를 비용으로 차감', type: 'bool', hint: '주식보상비용만큼 FCFF를 줄임' },
+    { key: 'sbc', label: '주식보상비용/매출 (SBC %)', type: 'pct' },
   ];
 
   function blank() {
@@ -28,6 +33,7 @@
     return {
       ticker: '', baseFY: new Date().getFullYear() - 1, price: 0, shares: 0, cash: 0, debt: 0,
       tax: 0.21, wacc: 0.08, g: 0.02, normCapex: 0.05, normDA: 0.05,
+      beta: 0, rf: 0.042, erp: 0.05, sbcOn: false, sbc: 0,
       revenue: arr(0), growth: arr(0.05), margin: arr(0.2), da: arr(0.05), capex: arr(0.05), nwc: arr(0),
     };
   }
@@ -75,6 +81,11 @@
   // ---------- 2. 공통 가정 ----------
   function renderCommon() {
     $('#common').innerHTML = COMMON.map(f => {
+      if (f.type === 'bool') {
+        return `<label>${f.label}
+        <input data-common="${f.key}" type="checkbox" ${state[f.key] ? 'checked' : ''} style="width:auto">
+        ${f.hint ? `<span class="hint">${f.hint}</span>` : ''}</label>`;
+      }
       const v = f.type === 'pct' ? toInput(state[f.key], true) : state[f.key];
       const type = f.type === 'text' ? 'text' : 'number';
       return `<label>${f.label}
@@ -86,7 +97,8 @@
     const key = e.target.dataset.common;
     if (!key) return;
     const f = COMMON.find(x => x.key === key);
-    if (f.type === 'text') state[key] = e.target.value.toUpperCase();
+    if (f.type === 'bool') state[key] = e.target.checked;
+    else if (f.type === 'text') state[key] = e.target.value.toUpperCase();
     else if (f.type === 'int') state[key] = parseInt(e.target.value, 10) || 0;
     else state[key] = fromInput(e.target.value, f.type === 'pct');
     if (key === 'baseFY') renderYears(); // 회계연도 라벨 갱신
@@ -126,7 +138,11 @@
     s.margin = Array(N + 1).fill(margin);
     s.da = Array(N + 1).fill(last.daPct || 0);
     s.capex = Array(N + 1).fill(last.capexPct || 0);
-    s.nwc = Array(N + 1).fill(0);
+    const nwc = last.nwcPct != null ? Math.max(-0.2, Math.min(0.5, last.nwcPct)) : 0;
+    s.nwc = Array(N + 1).fill(+nwc.toFixed(4));
+    s.beta = j.beta || 0;
+    s.sbc = last.sbcPct || 0;
+    s.sbcOn = false;
     s.normCapex = +(avg(h.map(x => x.capexPct)) || last.capexPct || 0).toFixed(4);
     s.normDA = +Math.min(s.normCapex, Math.max(avg(h.map(x => x.daPct)) || 0, s.normCapex * 0.8)).toFixed(4);
     return s;
@@ -169,8 +185,23 @@
     $('#hist').innerHTML = `<thead><tr><th>회계연도</th>${h.map(x => `<th>FY${x.fy}</th>`).join('')}</tr></thead><tbody>` +
       row('매출 (백만 $)', x => fmt(x.revenue)) + row('영업이익률', x => pct(x.ebitMargin)) +
       row('감가상각비/매출', x => pct(x.daPct)) + row('캐펙스/매출', x => pct(x.capexPct)) +
-      row('실효세율', x => pct(x.taxRate)) + '</tbody>';
+      row('실효세율', x => pct(x.taxRate)) +
+      row('운전자본/매출', x => pct(x.nwcPct)) + row('주식보상비용/매출', x => pct(x.sbcPct)) + '</tbody>';
   }
+
+  // CAPM 자기자본비용 = 무위험이자율 + 베타 × 시장위험프리미엄 (차입금이 많으면 WACC는 이보다 낮음)
+  function capm() { return state.beta > 0 ? state.rf + state.beta * state.erp : null; }
+  $('#capm').addEventListener('click', e => {
+    if (!e.target.matches('button')) return;
+    const c = capm();
+    if (c == null) return;
+    state.wacc = +c.toFixed(4);
+    renderCommon();
+    recalc();
+  });
+
+  // 계산에 넘길 입력 (SBC 체크 해제 시 0)
+  function modelInput() { return Object.assign({}, state, { sbc: state.sbcOn ? state.sbc : 0 }); }
 
   // ---------- 3. 연도별 가정 ----------
   const YEAR_ROWS = [
@@ -250,7 +281,14 @@
     if (!state.shares) warn.push('발행주식수를 넣어주세요.');
     for (let t = 0; t <= 5; t++) if (!state.revenue[t]) { warn.push(`${t}년차 매출이 비어 있습니다.`); break; }
 
-    const r = DCF.compute(state);
+    const inp = modelInput();
+    const r = DCF.compute(inp);
+    const c = capm();
+    $('#capm').innerHTML = c == null ? '' :
+      `CAPM 자기자본비용 = ${pct(state.rf)} + 베타 ${(+state.beta).toFixed(2)} × ${pct(state.erp)} = <b>${pct(c)}</b> ` +
+      `<button class="mini ghost">할인율에 넣기</button> <span class="muted">(차입금이 많으면 WACC는 이보다 조금 낮습니다)</span>`;
+    const revG = ok0() ? DCF.reverse(inp, 'growth') : null;
+    const revM = ok0() ? DCF.reverse(inp, 'margin') : null;
     for (let t = 1; t <= 5; t++) { const el = $('#g-' + t); if (el) el.textContent = pct(r.rows[t - 1].growth); }
     for (let t = 6; t <= N; t++) { const el = $('#rev-' + t); if (el) el.textContent = fmt(r.rows[t - 1].revenue); }
 
@@ -264,11 +302,13 @@
       kpi('자기자본가치', fmt(r.equity)) +
       kpi('1~10년 FCFF 현재가치 합', fmt(r.pvSum)) +
       kpi('영구가치 현재가치', fmt(r.pvTv)) +
-      kpi('EV 중 영구가치 비중', pct(r.tvShare));
+      kpi('EV 중 영구가치 비중', pct(r.tvShare)) +
+      kpi('현재가가 가정하는 6~10년차 성장률', revG == null ? '범위 밖' : pct(revG)) +
+      kpi('현재가가 가정하는 영업이익률 (1~10년차)', revM == null ? '범위 밖' : pct(revM));
 
     const lines = [
       ['매출액', 'revenue'], ['성장률', 'growth', true], ['영업이익 (EBIT)', 'ebit'], ['법인세', 'taxes'],
-      ['NOPAT', 'nopat'], ['감가상각비', 'da'], ['캐펙스', 'capex'], ['운전자본 증감', 'dNwc'],
+      ['NOPAT', 'nopat'], ['감가상각비', 'da'], ['캐펙스', 'capex'], ['운전자본 증감', 'dNwc'], ...(state.sbcOn ? [['주식보상비용 (SBC)', 'sbc']] : []),
       ['<b>잉여현금흐름 FCFF</b>', 'fcff'], ['할인계수', 'df', 'df'], ['FCFF 현재가치', 'pv'],
     ];
     let h = '<thead><tr><th>백만 $</th>' + r.rows.map(x => `<th>${x.t}년차<br><span class="muted small">FY${state.baseFY + x.t}</span></th>`).join('') + '</tr></thead><tbody>';
@@ -281,6 +321,8 @@
     renderSens();
   }
 
+  function ok0() { return state.wacc > state.g && state.shares > 0 && state.price > 0; }
+
   function kpi(k, v, cls = '') {
     return `<div class="kpi ${cls}"><div class="k">${k}</div><div class="v">${v}</div></div>`;
   }
@@ -289,7 +331,7 @@
     const step = 0.01;
     const waccs = [-2, -1, 0, 1, 2].map(i => +(state.wacc + i * step).toFixed(4));
     const gs = [-1, -0.5, 0, 0.5, 1].map(i => +(state.g + i * step).toFixed(4));
-    const m = DCF.sensitivity(state, waccs, gs);
+    const m = DCF.sensitivity(modelInput(), waccs, gs);
     let h = '<thead><tr><th>WACC \\ g</th>' + gs.map(g => `<th>${pct(g)}</th>`).join('') + '</tr></thead><tbody>';
     waccs.forEach((w, i) => {
       h += `<tr><th>${pct(w)}</th>` + gs.map((g, j) => {
@@ -565,7 +607,8 @@
     const wb = new ExcelJS.Workbook();
     wb.calcProperties.fullCalcOnLoad = true;
     const ws = wb.addWorksheet('DCF');
-    const r = DCF.compute(state);
+    const inp = modelInput();
+    const r = DCF.compute(inp);
     const cols = 'BCDEFGHIJKL'.split('');
     const inputStyle = c => {
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
@@ -591,6 +634,7 @@
       [8, '정상화 캐펙스/매출 (영구가치용)', state.normCapex, PCT], [9, '정상화 감가상각비/매출 (영구가치용)', state.normDA, PCT],
       [10, '발행주식수 (Shares Outstanding)', state.shares, NUM], [11, '보유현금+단기투자 (Cash)', state.cash, NUM],
       [12, '총차입금 (Debt, 리스 제외)', state.debt, NUM], [13, '현재 주가 (Current Price)', state.price, USD],
+      [14, '주식보상비용/매출 (SBC, 0이면 미반영)', inp.sbc, PCT],
     ];
     for (const [row, label, v, nf] of common) { put('A' + row, label); put('B' + row, v, nf, true); }
 
@@ -602,7 +646,7 @@
       18: '매출 성장률', 19: '매출액 (Revenue)', 20: '영업이익률 (EBIT Margin)', 21: '감가상각비/매출 (D&A %)',
       22: '캐펙스/매출 (CapEx %)', 23: '순운전자본/매출증가분 (NWC % of ΔRev)', 25: '영업이익 (EBIT)', 26: '법인세 (Taxes)',
       27: '세후영업이익 (NOPAT)', 28: '감가상각비 (D&A)', 29: '자본적지출 (CapEx)', 30: '순운전자본증감 (ΔNWC)',
-      31: '잉여현금흐름 (FCFF)', 32: '할인계수 (Discount Factor)', 33: 'FCFF 현재가치 (PV)',
+      31: '잉여현금흐름 (FCFF, SBC 차감)', 32: '할인계수 (Discount Factor)', 33: 'FCFF 현재가치 (PV)',
     };
     Object.entries(labels).forEach(([row, l]) => put('A' + row, l));
     put('A24', '  ↑ 1~5년차 매출은 시킹알파 추정치 입력, 6~10년차는 성장률 입력. 비율은 연도별로 입력').font = { italic: true, color: { argb: 'FF808080' } };
@@ -624,7 +668,7 @@
       put(c + '28', f(`${c}19*${c}21`, row.da), NUM);
       put(c + '29', f(`${c}19*${c}22`, row.capex), NUM);
       put(c + '30', f(`(${c}19-${p}19)*${c}23`, row.dNwc), NUM);
-      put(c + '31', f(`${c}27+${c}28-${c}29-${c}30`, row.fcff), NUM).font = { bold: true };
+      put(c + '31', f(`${c}27+${c}28-${c}29-${c}30-${c}19*$B$14`, row.fcff), NUM).font = { bold: true };
       put(c + '32', f(`1/(1+$B$6)^${t}`, row.df), '0.0000');
       put(c + '33', f(`${c}31*${c}32`, row.pv), NUM);
     });
@@ -632,7 +676,7 @@
     put('A35', '3. 가치평가').font = { bold: true };
     const val = [
       [36, 'FCFF 현재가치 합계 (1~10년차)', 'SUM(C33:L33)', r.pvSum, NUM, '10년치 PV 합'],
-      [37, '영구가치 기준 FCFF (11년차, 정상화)', 'L19*(1+B7)*(L20*(1-B5)+B9-B8)-L19*B7*L23', r.fcf11, NUM, '11년차 매출 × (세후이익률 + 정상화 D&A − 정상화 캐펙스) − 운전자본'],
+      [37, '영구가치 기준 FCFF (11년차, 정상화)', 'L19*(1+B7)*(L20*(1-B5)+B9-B8-B14)-L19*B7*L23', r.fcf11, NUM, '11년차 매출 × (세후이익률 + 정상화 D&A − 정상화 캐펙스 − SBC) − 운전자본'],
       [38, '영구가치 (Terminal Value)', 'B37/(B6-B7)', r.tv, NUM, 'FCF11 / (WACC − g)'],
       [39, '영구가치의 현재가치', 'B38*L32', r.pvTv, NUM, '10년차 할인계수 적용'],
       [40, '기업가치 (Enterprise Value)', 'B36+B39', r.ev, NUM],

@@ -50,6 +50,11 @@ const TYPES = [
   "annualCurrentDebt",
   "annualDilutedAverageShares",
   "annualOrdinarySharesNumber",
+  "annualAccountsReceivable",
+  "annualInventory",
+  "annualAccountsPayable",
+  "annualCurrentAccruedExpenses",
+  "annualStockBasedCompensation",
 ];
 
 async function fromYahoo(ticker) {
@@ -102,6 +107,11 @@ async function fromYahoo(ticker) {
       daPct: round(da / rev),
       capexPct: round(Math.abs(v.annualCapitalExpenditure || 0) / rev),
       taxRate: ptx > 0 && tax != null ? round(tax / ptx) : null,
+      // 영업용 순운전자본 = 매출채권 + 재고 − 매입채무 − 미지급비용 (매출 대비)
+      nwcPct: v.annualAccountsReceivable != null
+        ? round(((v.annualAccountsReceivable || 0) + (v.annualInventory || 0) - (v.annualAccountsPayable || 0) - (v.annualCurrentAccruedExpenses || 0)) / rev)
+        : null,
+      sbcPct: v.annualStockBasedCompensation != null ? round(v.annualStockBasedCompensation / rev) : null,
     };
   });
   const lastDate = dates[dates.length - 1];
