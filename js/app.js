@@ -149,6 +149,9 @@
     s.nwcNote = nwcRaw > NWC_CAP ? `운전자본/매출이 ${(nwcRaw * 100).toFixed(1)}%로 높게 나와 20%로 제한했습니다 (금융 자회사 채권이 섞였을 수 있음). 필요하면 고치세요.` : '';
     s.nwc = Array(N + 1).fill(+nwc.toFixed(4));
     s.beta = j.beta || 0;
+    s.fromLookup = true;
+    s.companyName = j.companyName || j.ticker;
+    s.info = { source: j.source, debtNote: j.debtNote, balanceDate: j.balanceDate, history: j.history };
     s.sbc = last.sbcPct || 0;
     s.sbcOn = false;
     s.normCapex = +(avg(h.map(x => x.capexPct)) || last.capexPct || 0).toFixed(4);
@@ -167,6 +170,18 @@
       const res = await fetch('api/dcf-inputs?ticker=' + encodeURIComponent(ticker));
       const j = await res.json().catch(() => { throw new Error('자동 조회 서버가 없습니다 (Vercel 배포 주소에서만 동작).'); });
       if (!res.ok) throw new Error(j.error || '조회 실패');
+      // 같은 종목을 다시 계산하면 주가만 새로 받고, 캡처·PDF·직접 고친 값은 그대로 둔다
+      // (예전에는 매번 야후 값으로 처음부터 다시 채워서 PDF로 바꾼 차입금·운전자본과 캡처한 3~5년차 매출이 사라졌음)
+      if (state.fromLookup && state.ticker === ticker) {
+        state.price = j.currentPrice || state.price;
+        if (!state.beta) state.beta = j.beta || 0;
+        if (!lastLookup || lastLookup.ticker !== ticker) lastLookup = { ...j, ...(state.info || {}) };
+        renderAll();
+        renderHistory(state.info || j);
+        st.innerHTML = `${esc(j.companyName)} · 현재 주가를 새로 반영했습니다. 올린 캡처·PDF와 직접 고친 값은 그대로입니다. ` +
+          '<span class="muted">처음부터 다시 불러오려면 초기화 후 계산을 누르세요.</span>';
+        return;
+      }
       state = assumptionsFrom(j);
       lastLookup = j;
       renderAll();
@@ -174,7 +189,6 @@
       const assumed = state.revAssumed.map((a, t) => (a && t <= state.horizon ? t : 0)).filter(Boolean);
       st.innerHTML = `${esc(j.companyName)} · FY${state.baseFY + state.horizon}까지 ${state.horizon}년 예측 (애널리스트 컨센서스)` +
         (assumed.length ? ` · <span class="legend-assumed">${assumed[0]}~${assumed[assumed.length - 1]}년차 매출은 임시 가정</span>` : '') +
-        ' · 시킹알파 매출 추정치 캡처를 올리면 그 마지막 해까지 늘어납니다' +
         (state.nwcNote ? `<br><span class="neg">${esc(state.nwcNote)}</span>` : '');
       try { history.replaceState(null, '', '?t=' + encodeURIComponent(ticker)); } catch (e) { /* ignore */ }
     } catch (err) {
@@ -296,6 +310,7 @@
 
     const ok = !warn.length;
     const up = r.upside;
+    renderHero(r, ok, warn);
     $('#kpis').innerHTML =
       (warn.length ? `<div class="warn" style="grid-column:1/-1">${warn.join('<br>')}</div>` : '') +
       kpi('1주당 내재가치', ok ? '$' + fmt(r.perShare, 2) : '–', 'main') +
@@ -322,6 +337,21 @@
     $('#flows').innerHTML = h;
 
     renderSens();
+  }
+
+  // 화면 맨 위 요약: 1주당 가치, 현재가, 상승 여력
+  function renderHero(r, ok, warn) {
+    const up = r.upside;
+    const name = state.companyName || state.ticker || '';
+    $('#hero').innerHTML = !state.revenue[0] && !state.shares
+      ? '<p class="muted">티커를 넣고 계산을 누르세요.</p>'
+      : `<div class="hero-row">
+        <div class="hero-item main"><div class="k">1주당 적정가치</div><div class="v">${ok ? '$' + fmt(r.perShare, 2) : '–'}</div></div>
+        <div class="hero-item"><div class="k">현재 주가</div><div class="v">${state.price ? '$' + fmt(state.price, 2) : '–'}</div></div>
+        <div class="hero-item"><div class="k">${up != null && up >= 0 ? '상승 여력' : '하락 여지'}</div><div class="v ${up != null && up >= 0 ? 'pos' : 'neg'}">${ok && up != null ? (up >= 0 ? '+' : '') + pct(up) : '–'}</div></div>
+      </div>
+      <p class="muted small">${esc(name)} · FY${state.baseFY + r.horizon}까지 ${r.horizon}년 예측 · 할인율 ${pct(state.wacc)} · 영구성장률 ${pct(state.g)}</p>` +
+      (warn.length ? `<div class="warn">${warn.join('<br>')}</div>` : '');
   }
 
   function ok0() { return state.wacc > state.g && state.shares > 0 && state.price > 0; }
@@ -512,8 +542,8 @@
       const img = $('#preview');
       img.src = reader.result;
       img.hidden = false;
-      $('#btn-ocr').disabled = false;
-      $('#ocr-status').textContent = '이미지 준비됨. "숫자 읽기"를 누르세요.';
+      $('#btn-ocr').hidden = false;
+      $('#btn-ocr').click(); // 올리자마자 바로 읽음
     };
     reader.readAsDataURL(blob);
   }
@@ -547,7 +577,7 @@
       }
       estimates = result.estimates.map(x => Object.assign({ use: true }, x));
       renderEstimates(result.warnings || [], result.text || '');
-      status.textContent = `추정치 ${estimates.length}개를 찾았습니다.`;
+      status.textContent = estimates.length ? `추정치 ${estimates.length}개를 찾았습니다. 확인하고 "계산에 반영"을 누르세요.` : '추정치를 찾지 못했습니다.';
     } catch (err) {
       console.error(err);
       status.textContent = '읽기 실패: ' + (err.message || err);
@@ -689,7 +719,7 @@
     // 0년차 회계연도가 추정치와 안 맞으면 첫 추정치 직전 해로 맞춰 줌
     if (estimates.length && !estimates.some(e => slotFor(e.year))) {
       state.baseFY = Math.min(...estimates.map(e => e.year)) - 1;
-      warnings = warnings.concat(`0년차 회계연도를 FY${state.baseFY}로 바꿨습니다 (첫 추정치 바로 전 해). 다르면 2번 칸에서 고치세요.`);
+      warnings = warnings.concat(`0년차 회계연도를 FY${state.baseFY}로 바꿨습니다 (첫 추정치 바로 전 해). 다르면 '자세히 보기'에서 고치세요.`);
       renderCommon(); renderYears(); recalc();
     }
     $('#warnings').innerHTML = warnings.map(w => `<div class="warn">${esc(w)}</div>`).join('');
@@ -736,7 +766,7 @@
     renderYears();
     recalc();
     $('#ocr-status').textContent = `매출 ${n}개를 넣었습니다.`;
-    $('#years').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#hero').scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
   // ---------- 상단 버튼 ----------
@@ -860,6 +890,7 @@
 
   syncMode();
   renderAll();
+  if (state.info && state.info.history) renderHistory(state.info);
   const qt = new URLSearchParams(location.search).get('t');
   if (qt) lookup(qt);
 })();
