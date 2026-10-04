@@ -36,7 +36,75 @@
       tax: 0.21, wacc: 0.08, g: 0.02, normCapex: 0.05, normDA: 0.05,
       beta: 0, rf: 0.042, erp: 0.05, sbcOn: false, sbc: 0, horizon: 10,
       revenue: arr(0), growth: arr(0.05), margin: arr(0.2), da: arr(0.05), capex: arr(0.05), nwc: arr(0),
+      mode: 'basic', basic: blankBasic(),
     };
+  }
+
+  // ---------- 기본(강의) 방식: 원본 「DCF Valuation Model」 엑셀과 같은 고정 가정 ----------
+  // 모든 해에 같은 가정을 쓰고 5년만 계산. 법인세 21%, 순운전자본 매출의 1%는 강의 기본값.
+  function blankBasic() {
+    return { rev0: 0, growth: 0.1, margin: 0.2, tax: 0.21, da: 0.05, capex: 0.05, nwc: 0.01, years: 5, src: {} };
+  }
+  const BASIC_FIELDS = [
+    { key: 'rev0', label: '0년차 매출 (백만 $)', type: 'num' },
+    { key: 'growth', label: '매출 성장률 (%)', type: 'pct' },
+    { key: 'margin', label: '영업이익률 (%)', type: 'pct' },
+    { key: 'tax', label: '법인세율 (%)', type: 'pct' },
+    { key: 'da', label: '감가상각비/매출 (%)', type: 'pct' },
+    { key: 'capex', label: '캐펙스/매출 (%)', type: 'pct' },
+    { key: 'nwc', label: '순운전자본증감/매출 (%)', type: 'pct' },
+    { key: 'wacc', label: '할인율 (%)', type: 'pct', shared: true, hint: '좋은 회사 8%, 안 좋은 회사 12%' },
+    { key: 'g', label: '영구성장률 (%)', type: 'pct', shared: true },
+    { key: 'shares', label: '발행주식수 (백만 주)', type: 'num', shared: true },
+    { key: 'cash', label: '보유현금 (백만 $)', type: 'num', shared: true },
+    { key: 'debt', label: '총차입금 (백만 $)', type: 'num', shared: true },
+    { key: 'price', label: '현재 주가 ($)', type: 'num', shared: true },
+    { key: 'years', label: '예측 연수', type: 'int', hint: '강의 엑셀은 5년' },
+  ];
+
+  // 지금 갖고 있는 자료(티커 조회·캡처·PDF)로 기본 가정을 채움. 직접 고친 칸('user')은 건드리지 않음.
+  function basicRefresh(s) {
+    const b = s.basic = Object.assign(blankBasic(), s.basic || {});
+    b.src = b.src || {};
+    const set = (k, v, label) => { if (b.src[k] === 'user' || v == null || !Number.isFinite(v)) return; b[k] = +(+v).toFixed(k === 'rev0' ? 1 : 4); b.src[k] = label; };
+    const H = Math.max(1, Math.min(N, s.horizon || 1));
+    set('rev0', s.revenue[0] || null, '최근 실적');
+    // 매출 성장률: 애널리스트 매출 추정치가 있는 마지막 해까지의 연평균 (없으면 최근 실적 성장률)
+    let tk = 0;
+    for (let t = 1; t <= H; t++) if (s.revenue[t] > 0 && !(s.revAssumed && s.revAssumed[t])) tk = t;
+    if (tk && s.revenue[0] > 0) set('growth', Math.pow(s.revenue[tk] / s.revenue[0], 1 / tk) - 1, `애널리스트 매출 추정치 ${tk}년 연평균`);
+    else {
+      const h = s.info && s.info.history;
+      if (h && h.length > 1 && h[h.length - 2].revenue > 0) set('growth', h[h.length - 1].revenue / h[h.length - 2].revenue - 1, '최근 실적 성장률');
+    }
+    // 이익률·감가상각비·캐펙스: 시킹알파 추정치(EBIT/EPS 등)가 있으면 그 평균, 없으면 최근 실적
+    const avgSrc = key => {
+      const v = [], kinds = new Set();
+      for (let t = 1; t <= H; t++) { const k = s.src && s.src[key] && s.src[key][t]; if (k === 'est' || k === 'eps') { v.push(s[key][t]); kinds.add(k); } }
+      return v.length ? { v: v.reduce((a, c) => a + c, 0) / v.length, label: kinds.has('est') ? '시킹알파 추정치 평균' : 'EPS로 추정 (평균)' } : null;
+    };
+    for (const key of ['margin', 'da', 'capex']) {
+      const e = avgSrc(key);
+      if (e) set(key, e.v, e.label);
+      else set(key, s[key][0], '최근 실적');
+    }
+    for (const [k, v] of [['tax', 0.21], ['nwc', 0.01], ['years', 5]]) if (!b.src[k]) { b[k] = v; b.src[k] = '강의 기본값'; }
+    return s;
+  }
+  function basicInput() {
+    const b = state.basic;
+    return { rev0: b.rev0, growth: b.growth, margin: b.margin, tax: b.tax, da: b.da, capex: b.capex, nwc: b.nwc, years: b.years,
+      wacc: state.wacc, g: state.g, shares: state.shares, cash: state.cash, debt: state.debt, price: state.price };
+  }
+
+  // 강의 영상의 마이크론 예시 (구글 시트와 같은 값 → 1주당 $1,246.83)
+  function micron() {
+    const s = blank();
+    Object.assign(s, { ticker: 'MU', companyName: 'Micron (강의 예시)', shares: 1130, cash: 26020, debt: 6370, wacc: 0.08, g: 0.02, mode: 'basic' });
+    s.revenue[0] = 129740;
+    const src = { rev0: '강의 예시', growth: '강의 예시', margin: '강의 예시', tax: '강의 예시', da: '강의 예시', capex: '강의 예시', nwc: '강의 예시', years: '강의 예시' };
+    s.basic = { rev0: 129740, growth: 0.3, margin: 0.4, tax: 0.21, da: 0.1, capex: 0.2, nwc: 0.01, years: 5, src };
+    return s;
   }
 
   // DCF_개선판_v2_GOOGL.xlsx 와 같은 값 (검증용: 1주당 $307.47)
@@ -52,10 +120,12 @@
     s.da = [0.052, 0.06, 0.08, 0.1, 0.11, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12];
     s.capex = [0.227, 0.4, 0.35, 0.28, 0.22, 0.18, 0.16, 0.15, 0.15, 0.15, 0.15];
     s.nwc = Array(N + 1).fill(0);
-    return s;
+    s.mode = 'advanced';
+    return basicRefresh(s);
   }
 
-  let state = load() || googl();
+  let state = load() || micron();
+  if (!state.basic || !state.basic.src) basicRefresh(state);
 
   function load() {
     try {
@@ -156,7 +226,8 @@
     s.sbcOn = false;
     s.normCapex = +(avg(h.map(x => x.capexPct)) || last.capexPct || 0).toFixed(4);
     s.normDA = +Math.min(s.normCapex, Math.max(avg(h.map(x => x.daPct)) || 0, s.normCapex * 0.8)).toFixed(4);
-    return s;
+    s.basic = blankBasic();
+    return basicRefresh(s);
   }
 
   async function lookup(ticker) {
@@ -342,7 +413,9 @@
 
     const ok = !warn.length;
     const up = r.upside;
-    renderHero(r, ok, warn);
+    renderBasic();
+    if (state.mode === 'basic') { const bw = basicWarnings(); renderHero(DCF.simple(basicInput()), !bw.length, bw); }
+    else renderHero(r, ok, warn);
     $('#kpis').innerHTML =
       (warn.length ? `<div class="warn" style="grid-column:1/-1">${warn.join('<br>')}</div>` : '') +
       kpi('1주당 내재가치', ok ? '$' + fmt(r.perShare, 2) : '–', 'main') +
@@ -382,9 +455,65 @@
         <div class="hero-item"><div class="k">현재 주가</div><div class="v">${state.price ? '$' + fmt(state.price, 2) : '–'}</div></div>
         <div class="hero-item"><div class="k">${up != null && up >= 0 ? '상승 여력' : '하락 여지'}</div><div class="v ${up != null && up >= 0 ? 'pos' : 'neg'}">${ok && up != null ? (up >= 0 ? '+' : '') + pct(up) : '–'}</div></div>
       </div>
-      <p class="muted small">${esc(name)} · FY${state.baseFY + r.horizon}까지 ${r.horizon}년 예측 · 할인율 ${pct(state.wacc)} · 영구성장률 ${pct(state.g)}</p>` +
+      <p class="muted small">${esc(name)} · ${state.mode === 'basic'
+        ? `기본(강의 방식) ${r.horizon}년 · 매출 성장률 ${pct(state.basic.growth)} · 영업이익률 ${pct(state.basic.margin)}`
+        : `연도별(고급) · FY${state.baseFY + r.horizon}까지 ${r.horizon}년 예측`} · 할인율 ${pct(state.wacc)} · 영구성장률 ${pct(state.g)}</p>` +
       (warn.length ? `<div class="warn">${warn.join('<br>')}</div>` : '');
   }
+
+  function activeResult() { return state.mode === 'basic' ? DCF.simple(basicInput()) : DCF.compute(modelInput()); }
+  function basicWarnings() {
+    const w = [];
+    if (!(state.basic.rev0 > 0)) w.push('0년차 매출을 넣어주세요.');
+    if (!(state.shares > 0)) w.push('발행주식수를 넣어주세요.');
+    if (state.wacc <= state.g) w.push('할인율이 영구성장률보다 커야 합니다.');
+    return w;
+  }
+
+  // 기본(강의) 방식 화면: 가정 입력 + 원본 엑셀과 같은 5년 표
+  function renderBasicForm() {
+    const b = state.basic;
+    $('#basic-form').innerHTML = BASIC_FIELDS.map(f => {
+      const v = f.shared ? state[f.key] : b[f.key];
+      const src = f.shared ? (f.hint || '') : (b.src[f.key] === 'user' ? '직접 입력' : b.src[f.key] || '');
+      return `<label>${f.label}<input data-basic="${f.key}" type="number" step="any" value="${esc(f.type === 'pct' ? toInput(v, true) : v)}">` +
+        (src ? `<span class="hint">${esc(src)}</span>` : '') + '</label>';
+    }).join('');
+  }
+  $('#basic-form').addEventListener('input', e => {
+    const key = e.target.dataset.basic;
+    if (!key) return;
+    const f = BASIC_FIELDS.find(x => x.key === key);
+    const v = f.type === 'int' ? Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 5)) : fromInput(e.target.value, f.type === 'pct');
+    if (f.shared) state[key] = v;
+    else { state.basic[key] = v; state.basic.src[key] = 'user'; }
+    renderCommon();
+    recalc();
+  });
+  function renderBasic() {
+    const r = DCF.simple(basicInput());
+    const cols = r.rows;
+    const line = (label, f) => `<tr><td>${label}</td>${cols.map(x => `<td>${f(x)}</td>`).join('')}</tr>`;
+    $('#basic-table').innerHTML =
+      `<thead><tr><th>백만 $</th>${cols.map(x => `<th>${x.t}년차</th>`).join('')}</tr></thead><tbody>` +
+      line('매출액', x => fmt(x.revenue)) + line('영업이익 (EBIT)', x => fmt(x.ebit)) + line('법인세', x => fmt(x.taxes)) +
+      line('세후영업이익 (NOPAT)', x => fmt(x.nopat)) + line('감가상각비', x => fmt(x.da)) + line('캐펙스', x => fmt(x.capex)) +
+      line('순운전자본증감', x => fmt(x.dNwc)) + line('<b>잉여현금흐름 FCFF</b>', x => '<b>' + fmt(x.fcff) + '</b>') +
+      line('할인계수', x => x.df.toFixed(4)) + line('FCFF 현재가치', x => fmt(x.pv)) + '</tbody>';
+    const kv = (k, v, cls = '') => `<tr${cls}><td>${k}</td><td>${v}</td></tr>`;
+    $('#basic-sum').innerHTML = '<tbody>' +
+      kv('FCFF 현재가치 합계', fmt(r.pvSum)) + kv('영구가치', fmt(r.tv)) + kv('영구가치의 현재가치', fmt(r.pvTv)) +
+      kv('기업가치', fmt(r.ev)) + kv('차감: 총차입금', fmt(-state.debt)) + kv('가산: 보유현금', fmt(state.cash)) +
+      kv('자기자본가치', fmt(r.equity)) + kv('<b>1주당 내재가치</b>', '<b>$' + fmt(r.perShare, 2) + '</b>') + '</tbody>';
+    document.querySelectorAll('input[name=mode]').forEach(x => { x.checked = x.value === state.mode; });
+    $('#basic-card').hidden = state.mode !== 'basic';
+    $('#more').hidden = state.mode === 'basic';
+  }
+  document.addEventListener('change', e => {
+    if (e.target.name !== 'mode') return;
+    state.mode = e.target.value;
+    renderAll();
+  });
 
   function ok0() { return state.wacc > state.g && state.shares > 0 && state.price > 0; }
 
@@ -496,13 +625,16 @@
       next.wacc = prev.wacc; next.g = prev.g; next.rf = prev.rf; next.erp = prev.erp;
       next.estRaw = prev.estRaw;
       applyMetricEstimates(next); // 캡처한 EBIT·EBITDA·캐펙스 추정치는 PDF 실적보다 우선
+      next.basic = prev.basic;
     }
+    next.mode = prev.mode;
     // 운전자본은 PDF에서 금융 자회사 채권을 뺀 값이므로 20% 상한 안내는 필요 없음
     const last = history[history.length - 1];
     if (p.kinds.includes('balance') && last.nwcPct != null) {
       next.nwc = Array(N + 1).fill(+Math.max(-0.1, Math.min(0.5, last.nwcPct)).toFixed(4));
       next.nwcNote = '';
     }
+    basicRefresh(next);
 
     const rows = [
       ['매출 (0년차)', prev.revenue[0], next.revenue[0], fmt],
@@ -515,12 +647,12 @@
       ['현금+단기투자', prev.cash, next.cash, fmt],
       ['차입금', prev.debt, next.debt, fmt],
     ];
-    const prevPS = DCF.compute(modelInput()).perShare;
+    const prevPS = activeResult().perShare;
     state = next;
     lastLookup = merged;
     renderAll();
     renderHistory(merged);
-    const nowPS = DCF.compute(modelInput()).perShare;
+    const nowPS = activeResult().perShare;
     const notes = [];
     if (b && (b.financeDebt || b.financeLoans)) {
       notes.push(`금융 자회사(Finance Div.) 차입금 ${fmt(b.financeDebt)}와 대출채권 ${fmt(b.financeLoans)}은 차입금·운전자본에서 뺐습니다.`);
@@ -807,6 +939,8 @@
     // 예측 기간 = 매출 추정치가 있는 마지막 해
     if (maxT && state.horizon <= 5) state.horizon = maxT;
     applyMetricEstimates(state);
+    basicRefresh(state);
+    renderBasicForm();
     renderCommon();
     renderYears();
     recalc();
@@ -817,6 +951,82 @@
 
   // ---------- 상단 버튼 ----------
   $('#btn-example').addEventListener('click', () => { state = googl(); renderAll(); });
+  $('#btn-example-mu').addEventListener('click', () => { state = micron(); lastLookup = null; renderAll(); });
+  $('#btn-xlsx-basic').addEventListener('click', () => exportBasicXlsx().catch(err => alert('엑셀 만들기 실패: ' + err.message)));
+
+  // 기본(강의) 방식 엑셀: 강의의 「DCF Valuation Model」 시트와 같은 셀 배치·수식 (금액은 달러 단위)
+  async function exportBasicXlsx() {
+    const wb = new ExcelJS.Workbook();
+    wb.calcProperties.fullCalcOnLoad = true;
+    const ws = wb.addWorksheet('DCF Valuation Model');
+    const b = state.basic, r = DCF.simple(basicInput()), n = r.horizon;
+    const M = 1e6;
+    const cols = 'BCDEFGHIJKL'.split('').slice(0, n + 1), L = cols[n];
+    const put = (addr, v, fmtStr, input) => {
+      const c = ws.getCell(addr);
+      c.value = v;
+      if (fmtStr) c.numFmt = fmtStr;
+      if (input) { c.font = { color: { argb: 'FF1A3FAE' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF8D6' } }; }
+      return c;
+    };
+    const f = (formula, result) => ({ formula, result });
+    const NUMF = '#,##0', PCT = '0.0%';
+    ws.getColumn(1).width = 44;
+    cols.forEach(c => { ws.getColumn(c).width = 17; });
+    put('A1', `${state.companyName || state.ticker || ''} DCF Valuation Model (현금흐름할인법 모델)`).font = { bold: true, size: 13 };
+    put('A3', '1. 가정 (Assumptions)').font = { bold: true, color: { argb: 'FFC0362C' } };
+    const A = [
+      [4, '매출액 성장률 (Revenue Growth Rate)', b.growth, PCT], [5, '영업이익률 (EBIT Margin)', b.margin, PCT], [6, '법인세율 (Tax Rate)', b.tax, PCT],
+      [7, '감가상각비/매출 (D&A % of Rev)', b.da, PCT], [8, '자본적지출/매출 (CapEx % of Rev)', b.capex, PCT],
+      [9, '순운전자본증감/매출 (NWC % of Rev) 일상적인 활동을 유지', b.nwc, PCT], [10, '가중평균자본비용 (WACC) 할인율', state.wacc, PCT],
+      [11, '영구성장률 (Terminal Growth Rate)', state.g, PCT], [12, '발행주식수 (Shares Outstanding)', state.shares * M, NUMF],
+      [13, '보유현금 (Current Cash)', state.cash * M, NUMF], [14, '총차입금 (Current Debt)', state.debt * M, NUMF],
+    ];
+    for (const [row, label, v, nf] of A) { put('A' + row, label); put('B' + row, v, nf, true); }
+    put('A16', '2. 현금흐름 추정 (Cash Flow Projections)').font = { bold: true, color: { argb: 'FFC0362C' } };
+    cols.forEach((c, t) => put(c + '16', t === 0 ? '0년차 (현재)' : t + '년차'));
+    const labels = { 17: '매출액 (Revenue)', 18: '영업이익 (EBIT) 매출액*영업이익률', 19: '법인세 (Taxes) 영업이익*법인세율', 20: '세후영업이익 (NOPAT) 영업이익*(1-법인세율)',
+      21: '감가상각비 (D&A) 매출액*감가상각비', 22: '자본적지출 (CapEx) 매출액*자본적지출', 23: '순운전자본증감 (Change in NWC)', 24: '잉여현금흐름 (FCFF) B20+B21-B22-B23' };
+    Object.entries(labels).forEach(([row, l]) => put('A' + row, l));
+    const rev0 = b.rev0 * M;
+    cols.forEach((c, t) => {
+      const x = t ? r.rows[t - 1] : null, p = cols[t - 1];
+      put(c + 17, t === 0 ? rev0 : f(`${p}17*(1+$B$4)`, x.revenue * M), NUMF, t === 0);
+      put(c + 18, f(`${c}17*$B$5`, (t ? x.ebit : rev0 * b.margin / M) * M), NUMF);
+      put(c + 19, f(`${c}18*$B$6`, (t ? x.taxes : rev0 * b.margin * b.tax / M) * M), NUMF);
+      put(c + 20, f(`${c}18*(1-$B$6)`, (t ? x.nopat : rev0 * b.margin * (1 - b.tax) / M) * M), NUMF);
+      put(c + 21, f(`${c}17*$B$7`, (t ? x.da : rev0 * b.da / M) * M), NUMF);
+      put(c + 22, f(`${c}17*$B$8`, (t ? x.capex : rev0 * b.capex / M) * M), NUMF);
+      put(c + 23, f(`${c}17*$B$9`, (t ? x.dNwc : rev0 * b.nwc / M) * M), NUMF);
+      put(c + 24, f(`${c}20+${c}21-${c}22-${c}23`, t ? x.fcff * M : null), NUMF);
+      put(c + 27, t === 0 ? 1 : f(`1/((1+$B$10)^${t})`, x.df), '0.0000');
+      put(c + 28, f(`${c}24*${c}27`, t ? x.pv * M : null), NUMF);
+    });
+    put('A26', '3. 가치평가 (Valuation)').font = { bold: true, color: { argb: 'FFC0362C' } };
+    put('A27', '할인계수 (Discount Factor) 미래현금흐름을 현재가치로 환산');
+    put('A28', 'FCFF의 현재가치 (PV of FCF) B24*B27');
+    const V = [
+      [30, 'FCFF 현재가치 합계 (Sum of PV of FCF)', `SUM(C28:${L}28)`, r.pvSum * M],
+      [31, '영구가치 (Terminal Value)', `${L}24*(1+$B$11)/($B$10-$B$11)`, r.tv * M],
+      [32, '영구가치의 현재가치 (PV of Terminal Value)', `B31*${L}27`, r.pvTv * M],
+      [33, '기업가치 (Enterprise Value)', 'B30+B32', r.ev * M],
+      [34, '차감: 총차입금 (Less: Debt)', '-$B$14', -state.debt * M],
+      [35, '가산: 보유현금 (Plus: Cash)', '$B$13', state.cash * M],
+      [36, '자기자본가치 (Equity Value)', 'B33+B34+B35', r.equity * M],
+      [37, '1주당 내재가치 (Implied Share Price)', 'B36/$B$12', r.perShare],
+    ];
+    for (const [row, label, formula, v] of V) { put('A' + row, label); put('B' + row, f(formula, v), row === 37 ? '#,##0.00' : NUMF); }
+    ws.getCell('A37').font = { bold: true, color: { argb: 'FFC0362C' } };
+    ws.getCell('B37').font = { bold: true };
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${state.ticker || 'DCF'}_DCF_기본_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
   $('#btn-reset').addEventListener('click', () => {
     if (!confirm('입력값을 모두 지울까요?')) return;
     state = blank(); renderAll();
@@ -929,6 +1139,7 @@
   }
 
   function renderAll() {
+    renderBasicForm();
     renderCommon();
     renderYears();
     recalc();

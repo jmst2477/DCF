@@ -118,3 +118,10 @@ details.adv > summary { cursor: pointer; }
 .legend-fallback { border: 1px dashed var(--muted); color: var(--muted); padding: 0 6px; border-radius: 4px; }
 .grid input.eps { font-style: italic; }
 .legend-eps { background: var(--input-bg); color: var(--input-text); font-style: italic; padding: 0 6px; border-radius: 4px; }
+.mode-bar { display: flex; gap: 8px; margin: 0 0 8px; }
+.mode-bar label { flex-direction: row; align-items: center; gap: 6px; font-size: 14px; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; background: var(--card); cursor: pointer; }
+.mode-bar label:has(input:checked) { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#basic-form input { background: var(--input-bg); color: var(--input-text); }
+table.kv { width: auto; min-width: 320px; }
+ol.guide { margin: 4px 0 6px; padding-left: 20px; }
+ol.guide li { margin: 2px 0; }
