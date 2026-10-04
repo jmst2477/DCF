@@ -26,7 +26,7 @@
     <h2><span class="step">1</span> 매출 추정치 캡처 올리기 <span class="muted small">(선택)</span></h2>
     <div id="drop" class="drop" tabindex="0">
       <p><b>캡처 이미지를 끌어다 놓거나 클릭</b>, 또는 <kbd>Ctrl</kbd>+<kbd>V</kbd></p>
-      <p class="muted small">시킹알파 → Earnings → Estimates → <b>Annual</b> → 아래쪽 <b>Revenue Estimates</b> 표 (EPS 표 말고)</p>
+      <p class="muted small">시킹알파 → Earnings → Estimates → <b>Annual</b> → <b>EPS와 매출(Revenue)</b> 표를 한 장에 캡처하면 연도별 매출과 이익률이 들어갑니다. EBIT, EBITDA, Capital Expenditure 표가 보이면 함께 올려도 됩니다.</p>
       <input id="file" type="file" accept="image/*" hidden>
       <img id="preview" alt="" hidden>
     </div>
@@ -39,7 +39,7 @@
       <div id="warnings"></div>
       <div class="table-scroll">
         <table id="est-table" class="grid">
-          <thead><tr><th>넣기</th><th>화면 표기</th><th>회계연도</th><th>읽은 글자</th><th>매출 (백만 $)</th><th>들어갈 칸</th></tr></thead>
+          <thead><tr><th>넣기</th><th>항목</th><th>화면 표기</th><th>회계연도</th><th>읽은 글자</th><th>값 (백만 $, EPS는 $)</th><th>들어갈 칸</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -99,6 +99,7 @@
     <div class="table-scroll">
       <table id="years" class="grid years"></table>
     </div>
+    <p id="years-legend" class="small"></p>
 
     <h3>연도별 현금흐름</h3>
     <div class="table-scroll">

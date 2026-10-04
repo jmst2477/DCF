@@ -113,3 +113,8 @@ details.adv > summary { cursor: pointer; }
   .hero-item.main .v { font-size: 32px; }
   .hero-item .v { font-size: 20px; }
 }
+.grid input.fallback { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
+.legend-est { background: var(--input-bg); color: var(--input-text); padding: 0 6px; border-radius: 4px; }
+.legend-fallback { border: 1px dashed var(--muted); color: var(--muted); padding: 0 6px; border-radius: 4px; }
+.grid input.eps { font-style: italic; }
+.legend-eps { background: var(--input-bg); color: var(--input-text); font-style: italic; padding: 0 6px; border-radius: 4px; }
