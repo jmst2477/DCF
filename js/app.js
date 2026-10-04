@@ -228,6 +228,8 @@
 
   // ---------- 3. 연도별 가정 ----------
   // 시킹알파 EBIT·EBITDA·캐펙스 추정치(백만 $, 회계연도별) → 연도별 영업이익률, 감가상각비/매출(EBITDA−EBIT), 캐펙스/매출.
+  // EBIT 표가 없으면 EPS 추정치로 이익률을 추정: EPS × 발행주식수 ÷ (1 − 법인세율) ÷ 매출 (세전이익률).
+  // 시킹알파 EPS는 보통 조정(Non-GAAP) 기준이라 주식보상비용이 빠져 있으므로, 이때는 SBC 차감을 켠다.
   // 추정치가 없는 칸은 최근 실적을 그대로 쓰고(fallback), 화면에 점선으로 표시한다.
   function applyMetricEstimates(s) {
     const raw = s.estRaw || {};
@@ -237,7 +239,13 @@
       const y = s.baseFY + t, rev = s.revenue[t];
       if (!(rev > 0)) continue;
       const ebit = raw.ebit && raw.ebit[y], ebitda = raw.ebitda && raw.ebitda[y], capex = raw.capex && raw.capex[y];
+      const eps = raw.eps && raw.eps[y];
       if (ebit != null) { s.margin[t] = +(ebit / rev).toFixed(4); s.src.margin[t] = 'est'; }
+      else if (eps != null && s.shares > 0 && s.tax < 1) {
+        s.margin[t] = +(eps * s.shares / (1 - s.tax) / rev).toFixed(4);
+        s.src.margin[t] = 'eps';
+        if (!s.sbcOn && s.sbc > 0) s.sbcOn = true;
+      }
       if (ebitda != null && ebit != null) { s.da[t] = +Math.max(0, (ebitda - ebit) / rev).toFixed(4); s.src.da[t] = 'est'; }
       if (capex != null) { s.capex[t] = +(Math.abs(capex) / rev).toFixed(4); s.src.capex[t] = 'est'; }
     }
@@ -280,15 +288,17 @@
       for (let t = 0; t <= H; t++) {
         if (t === 0) { h += `<td class="muted">${r.key === 'nwc' ? '' : pct(state[r.key][0])}</td>`; continue; }
         const src = state.src && state.src[r.key] && state.src[r.key][t];
-        const cls = src === 'est' ? ' class="est"' : src === 'user' ? '' : ` class="fallback" title="시킹알파 추정치가 없어 최근 실적(FY${state.baseFY})을 그대로 씀"`;
+        const cls = src === 'est' ? ' class="est"' : src === 'user' ? ''
+          : src === 'eps' ? ' class="eps" title="EPS 추정치 × 주식수 ÷ (1 − 세율) ÷ 매출 (조정 EPS 기준 세전이익률)"'
+          : ` class="fallback" title="시킹알파 추정치가 없어 최근 실적(FY${state.baseFY})을 그대로 씀"`;
         h += `<td><input${cls} data-y="${r.key}" data-t="${t}" data-pct="1" type="number" step="any" value="${toInput(state[r.key][t], true)}"></td>`;
       }
       h += `<td class="qf"><input data-qf="${r.key}" type="number" step="any" placeholder="%"> <button class="mini ghost" data-qfbtn="${r.key}">전체</button></td></tr>`;
     }
     h += '</tbody>';
     $('#years').innerHTML = h;
-    $('#years-legend').innerHTML = '<span class="legend-est">시킹알파 추정치</span> <span class="legend-fallback">추정치 없음 → 최근 실적 그대로</span>' +
-      ' <span class="muted">EBIT·EBITDA·Capital Expenditure 표를 캡처해 올리면 영업이익률·감가상각비·캐펙스가 연도별로 바뀝니다. 운전자본은 시킹알파 추정치가 없습니다.</span>';
+    $('#years-legend').innerHTML = '<span class="legend-est">시킹알파 추정치</span> <span class="legend-eps">EPS로 추정</span> <span class="legend-fallback">추정치 없음 → 최근 실적 그대로</span>' +
+      ' <span class="muted">EPS·매출 표를 캡처하면 영업이익률이 연도별로 바뀝니다 (EPS × 주식수 ÷ (1 − 세율) ÷ 매출, 조정 EPS라 이때는 SBC 차감이 켜짐). EBIT·EBITDA·Capital Expenditure 표가 있으면 그 값을 우선 씁니다. 운전자본은 시킹알파 추정치가 없습니다.</span>';
   }
 
   $('#years').addEventListener('input', e => {

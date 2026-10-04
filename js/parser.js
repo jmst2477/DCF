@@ -64,14 +64,16 @@
   }
 
   // 표 제목 → 항목. 시킹알파 Estimates 화면은 Revenue 외에 EBIT, EBITDA, Capital Expenditure 등도 연도별로 보여 준다.
+  // 한국어로 번역된 화면("CONSENSUS 매출 ESTIMATES")도 인식
   const METRICS = [
+    { key: 'eps', re: /\bEPS\b|주당\s*순이익/i },
     { key: 'ebitda', re: /\bEBITDA\b/i },
-    { key: 'ebit', re: /\bEBIT\b(?!DA)/i },
-    { key: 'capex', re: /capital\s*expenditure|\bcapex\b/i },
-    { key: 'revenue', re: /\brevenue\b|\bsales\b/i },
-    { key: null, re: /\bEPS\b|net\s*income|cash\s*flow|dividend|book\s*value|pre-?tax/i }, // 쓰지 않는 표
+    { key: 'ebit', re: /\bEBIT\b(?!DA)|영업\s*이익/i },
+    { key: 'capex', re: /capital\s*expenditure|\bcapex\b|자본적\s*지출|설비\s*투자/i },
+    { key: 'revenue', re: /\brevenue\b|\bsales\b|매출/i },
+    { key: null, re: /net\s*income|cash\s*flow|dividend|book\s*value|pre-?tax|순이익|배당/i }, // 쓰지 않는 표
   ];
-  const METRIC_KO = { revenue: '매출', ebit: 'EBIT(영업이익)', ebitda: 'EBITDA', capex: '캐펙스' };
+  const METRIC_KO = { revenue: '매출', eps: 'EPS', ebit: 'EBIT(영업이익)', ebitda: 'EBITDA', capex: '캐펙스' };
 
   function metricOf(line) {
     if (findPeriods(line).length || findMoney(line).length) return undefined; // 숫자가 있는 줄은 제목이 아님
@@ -85,8 +87,8 @@
     const warnings = [];
     const out = [];
     for (const sec of sections(all)) {
-      let found = parseRows(sec.lines);
-      if (found.length < 2) {
+      let found = sec.metric === 'eps' ? parseEpsRows(sec.lines) : parseRows(sec.lines);
+      if (found.length < 2 && sec.metric !== 'eps') {
         const col = parseColumns(sec.lines);
         if (col.length > found.length) found = col;
       }
@@ -99,6 +101,9 @@
       }
       if (dup) warnings.push(`${METRIC_KO[sec.metric]}: 같은 연도가 여러 번 나왔습니다. Quarterly(분기)가 아니라 Annual(연간) 화면인지 확인하세요. 연도별 첫 값만 사용했습니다.`);
       out.push(...[...byYear.values()].sort((a, b) => a.year - b.year));
+    }
+    if (out.length && !out.some(e => e.metric === 'revenue') && out.every(e => e.metric === 'eps')) {
+      warnings.push('EPS만 읽었습니다. 같은 화면의 매출(Revenue) 표도 함께 캡처하면 EPS로 연도별 이익률을 추정합니다.');
     }
     if (!out.length) {
       warnings.push(looksLikeEps(all)
@@ -146,6 +151,19 @@
       const money = findMoney(line).filter(x => x.index >= p.end);
       if (!money.length) continue;
       out.push({ year: p.year, label: p.label, value: money[0].value, raw: money[0].raw, source: 'row' });
+    }
+    return out;
+  }
+
+  // EPS 표: 단위 없는 주당 금액 — 기간 다음에 처음 나오는 소수 숫자 (예: "Jan 2027 3.48 103.36% ...")
+  function parseEpsRows(lines) {
+    const out = [];
+    for (const line of lines) {
+      const periods = findPeriods(line);
+      if (periods.length !== 1) continue;
+      const m = /^\s*\$?(-?\d{1,4}\.\d{1,3})(?![\d%])/.exec(line.slice(periods[0].end));
+      if (!m) continue;
+      out.push({ year: periods[0].year, label: periods[0].label, value: parseFloat(m[1]), raw: m[1], source: 'row' });
     }
     return out;
   }
