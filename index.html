@@ -147,7 +147,10 @@
         <div class="tabs"><button type="button" data-tab="sig" class="on">신호 차트</button><button type="button" data-tab="tv">트레이딩뷰</button></div>
         <button type="button" id="modal-close" class="ghost mini">닫기 ✕</button>
       </div>
-      <div class="strat-pick modal-pick"></div>
+      <div class="modal-pick">
+        <div class="pick-row"><span class="pick-label">신호</span><div class="strat-pick"></div></div>
+        <div class="pick-row"><span class="pick-label">지표</span><div class="ind-pick"></div></div>
+      </div>
       <div id="modal-sig" class="modal-chart"></div>
       <div id="modal-tv" class="modal-chart" hidden></div>
       <details id="modal-info" class="modal-info">
@@ -158,6 +161,23 @@
         <p class="hint">일봉 종가 기준으로 사이트에서 직접 계산합니다 (야후 주가). 장이 열려 있는 동안은 오늘 봉이 아직 끝나지 않아 신호가 바뀔 수 있습니다. 투자 판단은 본인 책임입니다.</p>
       </details>
     </section>
+    <!-- ＋ 신호 추가 / ＋ 지표 추가 -->
+    <div id="add-panel" class="add-panel" hidden>
+      <div class="add-box" role="dialog" aria-label="신호·지표 추가">
+        <div class="add-head"><b>신호·지표 추가</b><button type="button" id="add-close" class="ghost mini">닫기 ✕</button></div>
+        <div class="add-kind">
+          <label><input type="radio" name="add-kind" value="strategy" checked> <span><b>매매 신호</b> <span class="muted small">매수·청산 표시 + 승률</span></span></label>
+          <label><input type="radio" name="add-kind" value="indicator"> <span><b>차트 지표</b> <span class="muted small">선·표시를 차트에 그림</span></span></label>
+        </div>
+        <p class="muted small">트레이딩뷰 Pine Editor의 코드를 전부 복사해 아래에 붙여 넣으세요. 사이트가 코드를 직접 읽어서 지금 종목으로 시험해 봅니다.</p>
+        <textarea id="add-code" rows="9" spellcheck="false" autocomplete="off" placeholder="//@version=5&#10;strategy(&quot;내 신호&quot;, overlay=true)&#10;..."></textarea>
+        <div class="add-actions"><input id="add-name" placeholder="이름 (비우면 코드에 적힌 제목)" autocomplete="off"><button type="button" id="add-check" class="ghost">읽어 보기</button><button type="button" id="add-save" disabled>추가</button></div>
+        <div id="add-result" class="add-result" hidden></div>
+        <p class="muted small">읽을 수 있는 것: 변수 계산, input, ta.* 지표, if 안의 strategy.entry·strategy.close, alertcondition, plotshape, plot, hline, for 반복. 못 읽는 것(배열, 직접 만든 함수 등)은 채팅으로 보내 주세요.</p>
+        <h4 class="add-sub">내가 추가한 것 <span class="muted small">(이 브라우저에만 저장)</span></h4>
+        <ul id="add-list" class="add-list"></ul>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -165,6 +185,7 @@
 <script src="js/ta.js"></script>
 <script src="js/smc.js"></script>
 <script src="js/strategy.js"></script>
+<script src="js/pine.js"></script>
 <script src="js/chart.js"></script>
 <script src="js/app.js"></script>
 </body>

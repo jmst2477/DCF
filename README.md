@@ -17,13 +17,17 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 ## 차트 · 매매 신호 (제목 옆 "📈 차트" 버튼)
 - 첫 화면은 DCF만 보여 주고, 차트는 제목 옆 **차트** 버튼을 눌렀을 때만 화면 전체로 열립니다.
 - 차트: 트레이딩뷰의 무료 차트 라이브러리(Lightweight Charts)로 야후 일봉(`/api/prices`, 약 5년치) 캔들·거래량을 그리고, 고른 매매 신호의 매수(▲)·매도(▼) 표시, 200일선, PWMA(오르면 초록·내리면 빨강), SMC 구조(BOS·CHoCH 선), 아래 칸에 스토캐스틱(5, 3, 3)을 입힙니다 (`js/chart.js`). "트레이딩뷰" 탭은 트레이딩뷰 무료 위젯입니다.
-- 매매 신호 고르기: 차트 위의 신호 이름을 누르면 그 신호 하나만 차트와 관심종목에 나옵니다(신호마다 색이 다름). 고른 신호는 브라우저에 기억됩니다.
-- 관심종목: 왼쪽에 티커를 추가하면 종목마다 등락과 고른 신호의 오늘 상태(매수·청산·보유)가 나오고, 누르면 그 종목 차트로 바뀝니다. "오늘 매수·청산 신호 종목만"으로 거를 수 있습니다. 관심종목은 그 브라우저에만 저장됩니다.
-- 차트 아래 "신호 자세히": 고른 신호의 마지막 신호, 이 조건대로 사고팔았을 때의 거래 수·승률·누적 수익(다음 날 시가 체결, 수수료 0.05%), 보조 지표 상태, 최근 신호 목록.
-- 신호 목록(`js/strategy.js`의 `STRATEGIES`):
+- 차트 위 버튼 두 줄: **신호**(한 번에 하나만, 버튼마다 이 종목 승률이 붙음)와 **지표**(여러 개 켜고 끄기: 200일선, PWMA, SMC 구조, 스토캐스틱). 고른 것은 브라우저에 기억됩니다.
+- 승률: 신호 조건대로 사고팔았을 때(다음 날 시가 체결, 수수료 0.05%, 약 5년치) 이긴 거래 비율입니다. 신호 버튼, 차트 제목 줄, 관심종목 목록에 나오고, "신호 자세히"의 **전략별 지난 성적** 표에서 모든 신호의 거래 수·승률·거래당 평균·누적·오늘 상태를 한눈에 비교합니다.
+- 관심종목: 왼쪽에 티커를 추가하면 종목마다 등락, 고른 신호의 승률과 오늘 상태(매수·청산·보유)가 나오고, 누르면 그 종목 차트로 바뀝니다. "오늘 매수·청산 신호 종목만"으로 거를 수 있습니다. 관심종목은 그 브라우저에만 저장됩니다.
+- **＋ 신호 추가 / ＋ 지표 추가**: 트레이딩뷰 Pine Editor 코드를 통째로 붙여 넣으면 사이트가 코드를 직접 읽어서(`js/pine.js`, 코드를 실행하지 않고 글자를 해석해 `js/ta.js` 계산만 함) 지금 종목으로 시험해 보고, 추가를 누르면 신호·지표 목록에 들어갑니다. 추가한 것은 그 브라우저에만 저장되고 목록에서 지울 수 있습니다.
+  - 읽는 것: 변수 계산, `input.*` 기본값, `ta.*` 지표(sma, ema, rma, wma, rsi, stoch, macd, bb, atr, cci, vwma, highest, lowest, change, crossover, crossunder, pivothigh·pivotlow, barssince, valuewhen 등), 수식·비교·and/or/not, `x[1]`, 삼항식, `for i = 0 to n` 반복, `if`/`else` 안의 `strategy.entry`·`strategy.close`, `alertcondition`, `plotshape`, `plot`, `hline`.
+  - 매수·청산 찾는 순서: `strategy.entry`(매수)·`strategy.close`(청산) → 이름에 매수/Buy·매도/Sell이 들어간 `alertcondition`·`plotshape` → `buy`·`sell` 같은 변수 이름.
+  - 못 읽는 것: 배열·테이블, 직접 만든 함수(`=>`), `var`로 봉마다 이어 가는 계산, `strategy.exit`의 익절·손절 가격(빼고 계산). 이런 코드는 채팅으로 보내면 `js/strategy.js`에 직접 넣습니다.
+- 기본 신호(`js/strategy.js`의 `STRATEGIES`):
   - RSI-2 평균회귀: 사용자의 트레이딩뷰 전략 그대로. RSI(2) < 10 이고 종가가 200일선 위면 매수, RSI(2) > 70이면 청산.
   - 스토캐스틱 교차 (예시), SMC 내부 구조 전환 (예시): 사용자 확인 전 예시 조건.
-  - 새 신호 추가: 파인스크립트 조건을 `run(d, ta)`로 옮겨 `{ id, name, short, color, desc, run }`를 하나 더 넣습니다. `js/ta.js`에 파인스크립트와 같은 계산의 `ta.sma / ema / rma / wma / rsi / macd / bb / stdev / atr / stoch / highest / lowest / crossover / crossunder`가 있습니다.
+  - 기본 지표는 `CHART_INDICATORS`(`{ id, name, color, plot(d, ta) }`, `plot`은 `lines`·`hlines`·`segments`·`marks`·`status`를 돌려줌).
 - LuxAlgo SMC는 구조 판단만 옮겼습니다(`js/smc.js`, CC BY-NC-SA 4.0).
 
 화면은 토스증권처럼 회색 바탕에 흰 카드, 오르면 빨강·내리면 파랑입니다.
@@ -36,7 +40,8 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 - `js/sapdf.js` 시킹알파 재무제표 PDF → 실적·대차대조표 값
 - `api/prices.js` 티커 → 일봉 주가 (서버, Vercel)
 - `js/ta.js` 파인스크립트 ta.* 지표 계산
-- `js/strategy.js` 매수·청산 신호 조건과 보조 지표
+- `js/strategy.js` 기본 매수·청산 신호와 차트 지표
+- `js/pine.js` 붙여 넣은 파인스크립트 읽기 (＋ 추가)
 - `js/chart.js` 신호 차트 (Lightweight Charts)
 - `js/smc.js` LuxAlgo 스마트머니 구조(BOS·CHoCH)
 - `js/app.js` 화면 동작, 자동 가정, OCR, Claude API, 엑셀 내보내기
