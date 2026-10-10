@@ -83,10 +83,19 @@
       for (let t = 1; t <= H; t++) { const k = s.src && s.src[key] && s.src[key][t]; if (k === 'est' || k === 'eps') { v.push(s[key][t]); kinds.add(k); } }
       return v.length ? { v: v.reduce((a, c) => a + c, 0) / v.length, label: kinds.has('est') ? '시킹알파 추정치 평균' : 'EPS로 추정 (평균)' } : null;
     };
+    const fromEps = {};
     for (const key of ['margin', 'da', 'capex']) {
       const e = avgSrc(key);
+      fromEps[key] = !!e && e.label.startsWith('EPS');
       if (e) set(key, e.v, e.label);
       else set(key, s[key][0], '최근 실적');
+    }
+    // 시킹알파 EPS는 조정(Non-GAAP) EPS라 주식보상비용(SBC)과 인수 무형자산 상각비가 빠져 있음.
+    // 그대로 쓰면 이익률이 높아지고, 감가상각비(상각비 포함)를 또 더해 현금흐름이 두 번 부풀려짐 (예: 브로드컴).
+    if (fromEps.margin) {
+      const sbc = s.sbc > 0 ? s.sbc : 0;
+      if (sbc) set('margin', b.margin - sbc, `EPS로 추정 − 주식보상 ${(sbc * 100).toFixed(1)}%`);
+      if (b.src.da !== 'user' && !(avgSrc('da') || {}).v && b.da > b.capex) set('da', b.capex, '캐펙스와 같게 (조정 EPS는 상각비를 이미 뺌)');
     }
     for (const [k, v] of [['tax', 0.21], ['nwc', 0.01], ['years', 5]]) if (!b.src[k]) { b[k] = v; b.src[k] = '강의 기본값'; }
     return s;
