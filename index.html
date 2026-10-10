@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DCF 계산기</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <header class="top">
   <h1>DCF 계산기</h1>
-  <p class="sub">티커를 넣고 <b>계산</b>을 누르면 1주당 적정가치가 나옵니다. 시킹알파 자료를 올리면 더 정확해집니다.</p>
+  <p class="sub">티커를 넣고 <b>계산</b>을 누르면 지금·내년·내후년 적정가가 나옵니다.</p>
   <form id="lookup" class="lookup">
     <input id="lookup-ticker" placeholder="티커 (예: CAT)" autocomplete="off" autocapitalize="characters">
     <button type="submit" id="btn-lookup">계산</button>
@@ -19,10 +20,6 @@
 
 <main>
   <!-- 결과 한눈에 -->
-  <div class="mode-bar">
-    <label><input type="radio" name="mode" value="basic"> 기본 (강의 방식)</label>
-    <label><input type="radio" name="mode" value="advanced"> 연도별 (고급)</label>
-  </div>
   <section id="hero" class="hero"></section>
 
   <!-- 1. 매출 추정치 캡처 -->
@@ -107,61 +104,31 @@
     <div id="pdf-result"></div>
   </section>
 
-  <!-- 3. 기본(강의) 방식 -->
+  <!-- 3. 가정 · 계산 -->
   <section class="card" id="basic-card">
-    <h2><span class="step">3</span> 가정 확인 · 계산 <span class="muted small">(강의 엑셀과 같은 방식)</span></h2>
-    <p class="muted small">가정은 모든 해에 똑같이 적용됩니다. 노란 칸을 고치면 바로 다시 계산되고, 칸 아래 작은 글씨는 값이 어디서 왔는지입니다.</p>
+    <h2><span class="step">3</span> 가정 확인 · 계산</h2>
+    <p class="muted small">강의 엑셀과 같은 방식으로, 모든 해에 같은 가정을 써서 3년을 계산합니다. 칸을 고치면 바로 다시 계산되고, 칸 아래 작은 글씨는 값이 어디서 왔는지입니다.</p>
     <div class="form-grid" id="basic-form"></div>
-    <h3>현금흐름 추정</h3>
-    <div class="table-scroll"><table id="basic-table" class="grid"></table></div>
-    <h3>가치평가</h3>
-    <table id="basic-sum" class="grid kv"></table>
-    <div class="top-actions">
-      <button id="btn-xlsx-basic" class="ghost">엑셀 다운로드 (강의 양식)</button>
-      <button id="btn-example-mu" class="ghost">마이크론 예시 (강의)</button>
-    </div>
-  </section>
-
-  <!-- 연도별(고급) -->
-  <details class="card more" id="more" open>
-    <summary>연도별 가정 (고급)</summary>
-
-    <h3>계산 결과</h3>
-    <div class="kpis" id="kpis"></div>
 
     <div id="hist-wrap" class="table-scroll" hidden>
       <h3>최근 실적 <span class="muted small" id="hist-src"></span></h3>
       <table id="hist" class="grid"></table>
     </div>
 
-    <h3>기본 가정</h3>
-    <div class="form-grid" id="common"></div>
-    <p id="capm" class="small"></p>
+    <h3>현금흐름 추정</h3>
+    <div class="table-scroll"><table id="basic-table" class="grid"></table></div>
+    <h3>가치평가</h3>
+    <table id="basic-sum" class="grid kv"></table>
 
-    <h3>연도별 가정</h3>
-    <p class="muted small">노란 칸은 고칠 수 있습니다. 매출 추정치가 있는 해까지만 계산하고, 그다음 해부터는 영구가치로 잡습니다. 오른쪽 칸에 값을 넣고 <b>전체</b>를 누르면 모든 연도에 한 번에 들어갑니다.</p>
-    <div class="table-scroll">
-      <table id="years" class="grid years"></table>
-    </div>
-    <p id="years-legend" class="small"></p>
-
-    <h3>연도별 현금흐름</h3>
-    <div class="table-scroll">
-      <table id="flows" class="grid"></table>
-    </div>
-
-    <h3>할인율 × 영구성장률에 따른 1주당 가치</h3>
-    <div class="table-scroll">
-      <table id="sens" class="grid sens"></table>
-    </div>
+    <h3>할인율 × 영구성장률에 따른 지금 적정가</h3>
+    <div class="table-scroll"><table id="sens" class="grid sens"></table></div>
 
     <div class="top-actions">
-      <button id="btn-xlsx" class="ghost">엑셀 다운로드</button>
-      <button id="btn-example" class="ghost">GOOGL 예시</button>
+      <button id="btn-xlsx-basic" class="ghost">엑셀 다운로드</button>
       <button id="btn-reset" class="ghost">초기화</button>
     </div>
-    <p class="muted small">계산식은 「DCF 개선판 v2」 엑셀과 같습니다. 모든 계산은 브라우저 안에서만 이뤄집니다.</p>
-  </details>
+    <p class="muted small">모든 계산은 브라우저 안에서만 이뤄집니다.</p>
+  </section>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
