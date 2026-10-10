@@ -165,9 +165,6 @@ footer { padding: 8px 0 30px; }
 /* 시킹알파 넣기 */
 ol.guide { margin: 6px 0; padding-left: 20px; }
 ol.guide li { margin: 4px 0; }
-.auto-box { background: var(--accent-weak); border-radius: 16px; padding: 16px 18px; margin: 14px 0; }
-.auto-box ol { margin: 8px 0 4px; }
-a.bookmarklet { display: inline-block; padding: 4px 12px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; cursor: grab; }
 .drop {
   background: var(--soft); border: 1.5px dashed transparent; border-radius: 16px; padding: 18px; text-align: center; cursor: pointer;
   transition: border-color .15s, background .15s;
