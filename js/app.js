@@ -294,14 +294,20 @@
   // ---------- 매수 신호 (js/strategy.js 조건을 야후 일봉으로 계산) ----------
   const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
-  function findSignals(d, strat) {
+  // 트레이딩뷰 strategy와 같은 방식: 신호 봉 종가에서 판단 → 다음 봉 시가에 체결, 보유 중엔 매수 표시 안 함
+  function simulate(d, strat) {
     const out = strat.run(d, window.TA);
-    const list = [];
-    d.close.forEach((c, i) => {
-      if (out.buy && out.buy[i]) list.push({ i, kind: 'buy' });
-      else if (out.sell && out.sell[i]) list.push({ i, kind: 'sell' });
-    });
-    return list;
+    const n = d.close.length, fee = strat.commission || 0;
+    const marks = [], trades = [];
+    let pos = false, entry = null, pendBuy = false, pendExit = false;
+    for (let i = 0; i < n; i++) {
+      if (pendBuy && !pos) { pos = true; entry = { i, price: d.open[i] }; }
+      if (pendExit && pos) { pos = false; trades.push({ from: entry, to: { i, price: d.open[i] }, ret: (d.open[i] * (1 - fee)) / (entry.price * (1 + fee)) - 1 }); entry = null; }
+      pendBuy = !!out.buy[i]; pendExit = !!out.exit[i];
+      if (out.buy[i] && !pos) marks.push({ i, kind: 'buy' });
+      if (out.exit[i] && pos) marks.push({ i, kind: 'sell' });
+    }
+    return { out, marks, trades, pos, entry };
   }
   async function renderSignals(t) {
     const strat = window.STRATEGY;
@@ -309,10 +315,12 @@
     $('#sig-badge').className = 'sig-badge';
     $('#sig-badge').textContent = '신호 계산 중…';
     $('#sig-last').textContent = '';
+    $('#sig-stats').textContent = '';
+    $('#sig-ind').innerHTML = '';
     $('#sig-more').hidden = true;
     let d;
     try {
-      const res = await fetch('api/prices?ticker=' + encodeURIComponent(t));
+      const res = await fetch('api/prices?range=5y&ticker=' + encodeURIComponent(t));
       d = await res.json();
       if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
     } catch (e) {
@@ -320,31 +328,41 @@
       return;
     }
     if (chartTicker !== t) return; // 그 사이 다른 종목으로 바뀜
-    let list;
-    try { list = findSignals(d, strat); } catch (e) {
+    let sim;
+    try { sim = simulate(d, strat); } catch (e) {
       $('#sig-badge').textContent = '신호 계산 불가'; $('#sig-last').textContent = '조건 계산 오류: ' + (e.message || e); return;
     }
-    const n = d.close.length, last = d.close[n - 1];
-    const latest = list[list.length - 1];
+    const n = d.close.length, L = n - 1, last = d.close[L];
     const badge = $('#sig-badge');
-    if (latest && latest.i === n - 1) {
-      badge.className = 'sig-badge ' + latest.kind;
-      badge.textContent = latest.kind === 'buy' ? '오늘 매수 신호' : '오늘 매도 신호';
-    } else {
-      badge.className = 'sig-badge none';
-      badge.textContent = '오늘은 신호 없음';
-    }
+    if (sim.out.buy[L]) { badge.className = 'sig-badge buy'; badge.textContent = '오늘 매수 신호'; }
+    else if (sim.out.exit[L] && sim.pos) { badge.className = 'sig-badge sell'; badge.textContent = '오늘 청산 신호'; }
+    else if (sim.pos) { badge.className = 'sig-badge hold'; badge.textContent = '보유 구간 · 청산 신호 기다리는 중'; }
+    else { badge.className = 'sig-badge none'; badge.textContent = '오늘은 신호 없음'; }
+
+    const latest = sim.marks[sim.marks.length - 1];
     if (latest) {
-      const days = n - 1 - latest.i;
-      $('#sig-last').innerHTML = `마지막 신호: <b>${latest.kind === 'buy' ? '매수' : '매도'}</b> · ${d.time[latest.i]}${days ? ` (${days}거래일 전)` : ''} · ${fmtP(d.close[latest.i])}` +
+      const days = L - latest.i;
+      $('#sig-last').innerHTML = `마지막 신호: <b>${latest.kind === 'buy' ? '매수' : '청산'}</b> · ${d.time[latest.i]}${days ? ` (${days}거래일 전)` : ''} · ${fmtP(d.close[latest.i])}` +
         (days ? ` → 지금 ${fmtP(last)} ${fmtR(last / d.close[latest.i] - 1)}` : '');
-      const rows = list.slice(-10).reverse().map(s =>
-        `<tr><td>${d.time[s.i]}</td><td><span class="sig-tag ${s.kind}">${s.kind === 'buy' ? '매수' : '매도'}</span></td><td>${fmtP(d.close[s.i])}</td><td>${s.i === n - 1 ? '-' : fmtR(last / d.close[s.i] - 1)}</td></tr>`).join('');
+      const rows = sim.marks.slice(-10).reverse().map(s =>
+        `<tr><td>${d.time[s.i]}</td><td><span class="sig-tag ${s.kind}">${s.kind === 'buy' ? '매수' : '청산'}</span></td><td>${fmtP(d.close[s.i])}</td><td>${s.i === L ? '-' : fmtR(last / d.close[s.i] - 1)}</td></tr>`).join('');
       $('#sig-table').innerHTML = `<thead><tr><th>날짜</th><th>신호</th><th>그날 종가</th><th>지금까지</th></tr></thead><tbody>${rows}</tbody>`;
       $('#sig-more').hidden = false;
     } else {
-      $('#sig-last').textContent = `최근 ${d.time[0]} 이후로 신호가 한 번도 없었습니다.`;
+      $('#sig-last').textContent = `${d.time[0]} 이후로 신호가 한 번도 없었습니다.`;
     }
+    const tr = sim.trades;
+    if (tr.length) {
+      const wins = tr.filter(x => x.ret > 0).length;
+      const total = tr.reduce((a, x) => a * (1 + x.ret), 1) - 1;
+      const avg = tr.reduce((a, x) => a + x.ret, 0) / tr.length;
+      $('#sig-stats').innerHTML = `${d.time[0].slice(0, 4)}년 이후 이 조건대로 사고팔았다면: 거래 ${tr.length}번 · 이긴 거래 ${wins}번 (${Math.round((wins / tr.length) * 100)}%) · 거래당 평균 ${fmtR(avg)} · 누적 ${fmtR(total)} <span class="muted">(다음 날 시가 체결, 수수료 ${(strat.commission * 100).toFixed(2)}%)</span>`;
+    }
+    $('#sig-ind').innerHTML = (window.INDICATORS || []).map(ind => {
+      let r;
+      try { r = ind.run(d, window.TA); } catch (e) { r = { text: '계산 오류: ' + (e.message || e), tone: '' }; }
+      return `<li><span class="ind-name">${ind.name}</span><span class="ind-val ${r.tone ? 'chg ' + r.tone : ''}">${r.text}</span></li>`;
+    }).join('');
   }
 
   function recalc() {

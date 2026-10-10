@@ -201,3 +201,9 @@ a.bookmarklet { display: inline-block; padding: 4px 12px; border-radius: 8px; ba
 .sig-tag.sell { color: var(--down); }
 .signal-box details { margin: 6px 0; }
 .signal-box .hint { margin: 8px 0 0; }
+.sig-badge.hold { background: var(--accent-weak); color: var(--accent-dark); }
+.sig-stats { margin: 4px 0; color: var(--sub); }
+.sig-ind { list-style: none; padding: 0; margin: 10px 0 4px; border-top: 1px solid var(--line); }
+.sig-ind li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sig-ind .ind-name { color: var(--sub); min-width: 170px; font-weight: 500; }
+.sig-ind .ind-val { font-variant-numeric: tabular-nums; }
