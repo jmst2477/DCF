@@ -23,7 +23,7 @@
 
   function structure(d) {
     const n = d.close.length;
-    const mk = () => ({ cur: NaN, crossed: false });
+    const mk = () => ({ cur: NaN, crossed: false, at: 0 });
     const P = { swing: { hi: mk(), lo: mk(), bias: 0, last: null, events: [] }, internal: { hi: mk(), lo: mk(), bias: 0, last: null, events: [] } };
     const legSwing = legs(d, 50), legInt = legs(d, 5);
     // 크로스 판단용: 각 봉에서 갱신된 뒤의 기준선 값 (ta.crossover는 직전 봉의 기준선 값과 비교)
@@ -34,8 +34,8 @@
       [['swing', legSwing, 50], ['internal', legInt, 5]].forEach(([k, lg, size]) => {
         if (i === 0) return;
         const ch = lg[i] - lg[i - 1];
-        if (ch === 1) Object.assign(P[k].lo, { cur: d.low[i - size], crossed: false });
-        else if (ch === -1) Object.assign(P[k].hi, { cur: d.high[i - size], crossed: false });
+        if (ch === 1) Object.assign(P[k].lo, { cur: d.low[i - size], crossed: false, at: i - size });
+        else if (ch === -1) Object.assign(P[k].hi, { cur: d.high[i - size], crossed: false, at: i - size });
       });
       // displayStructure: 내부 먼저, 그다음 스윙
       ['internal', 'swing'].forEach(k => {
@@ -44,13 +44,13 @@
         if (c > p.hi.cur && c1 <= prevLvl[k].hi && !p.hi.crossed && hiExtra) {
           const tag = p.bias === BEARISH ? 'CHoCH' : 'BOS';
           p.hi.crossed = true; p.bias = BULLISH;
-          p.last = { bull: true, tag, i, time: d.time[i] }; p.events.push(p.last);
+          p.last = { bull: true, tag, i, time: d.time[i], from: p.hi.at, level: p.hi.cur }; p.events.push(p.last);
         }
         const loExtra = k === 'internal' ? P.internal.lo.cur !== P.swing.lo.cur : true;
         if (c < p.lo.cur && c1 >= prevLvl[k].lo && !p.lo.crossed && loExtra) {
           const tag = p.bias === BULLISH ? 'CHoCH' : 'BOS';
           p.lo.crossed = true; p.bias = BEARISH;
-          p.last = { bull: false, tag, i, time: d.time[i] }; p.events.push(p.last);
+          p.last = { bull: false, tag, i, time: d.time[i], from: p.lo.at, level: p.lo.cur }; p.events.push(p.last);
         }
         prevLvl[k].hi = p.hi.cur; prevLvl[k].lo = p.lo.cur;
       });
