@@ -287,6 +287,13 @@ body.modal-open { overflow: hidden; }
 .strat-desc { margin: 4px 0 0; }
 .strat-row .sig-last { margin: 6px 0 2px; }
 .strat-name { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 13px; }
+/* PC·휴대폰 같이 쓰기 */
+.sync-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.sync-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sync-row button { flex: none; white-space: nowrap; }
+.sync-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sync-form input { flex: 1; min-width: 0; padding: 7px 10px; }
+.sync-form p { flex-basis: 100%; margin: 0; }
 .wl-only { flex-direction: row; align-items: center; gap: 6px; margin: 0 2px 6px; color: var(--sub); }
 .wl-list.only li:not([data-sig="buy"]):not([data-sig="sell"]) { display: none; }
 .modal-info { border-top: 1px solid var(--line); padding: 8px 16px; flex: none; }

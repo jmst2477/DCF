@@ -24,6 +24,8 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
   - 읽는 것: 변수 계산, `input.*` 기본값, `ta.*` 지표(sma, ema, rma, wma, rsi, stoch, macd, bb, atr, cci, vwma, highest, lowest, change, crossover, crossunder, pivothigh·pivotlow, barssince, valuewhen 등), 수식·비교·and/or/not, `x[1]`, 삼항식, `for i = 0 to n` 반복, `if`/`else` 안의 `strategy.entry`·`strategy.close`, `alertcondition`, `plotshape`, `plot`, `hline`.
   - 매수·청산 찾는 순서: `strategy.entry`(매수)·`strategy.close`(청산) → 이름에 매수/Buy·매도/Sell이 들어간 `alertcondition`·`plotshape` → `buy`·`sell` 같은 변수 이름.
   - 못 읽는 것: 배열·테이블, 직접 만든 함수(`=>`), `var`로 봉마다 이어 가는 계산, `strategy.exit`의 익절·손절 가격(빼고 계산). 이런 코드는 채팅으로 보내면 `js/strategy.js`에 직접 넣습니다.
+- **PC·휴대폰 같이 쓰기**: 차트 화면 왼쪽 아래 "연결"에 비밀번호를 넣으면 관심종목과 추가한 신호·지표를 서버(`/api/sync`, Upstash Redis)에 저장해 여러 기기가 같이 씁니다. 처음 넣은 비밀번호가 저장소 비밀번호가 되고(해시로만 저장), 다른 기기에서도 같은 비밀번호를 넣습니다. 처음 연결할 때 그 기기 목록과 서버 목록을 합치고, 그 뒤로는 바꿀 때마다 바로 저장합니다. 비밀번호를 한 시간에 20번 틀리면 잠깁니다.
+  - 준비: Vercel 프로젝트 → Storage → Create → **Upstash for Redis**(무료) → 이 프로젝트에 연결 → 다시 배포. 환경 변수 `KV_REST_API_URL`·`KV_REST_API_TOKEN`(또는 `UPSTASH_REDIS_REST_URL`·`UPSTASH_REDIS_REST_TOKEN`)이 생기면 됩니다.
 - 기본 신호(`js/strategy.js`의 `STRATEGIES`):
   - RSI-2 평균회귀: 사용자의 트레이딩뷰 전략 그대로. RSI(2) < 10 이고 종가가 200일선 위면 매수, RSI(2) > 70이면 청산.
   - 스토캐스틱 교차 (예시), SMC 내부 구조 전환 (예시): 사용자 확인 전 예시 조건.
@@ -39,6 +41,7 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 - `js/parser.js` OCR 글자 → 연도별 매출 추정치
 - `js/sapdf.js` 시킹알파 재무제표 PDF → 실적·대차대조표 값
 - `api/prices.js` 티커 → 일봉 주가 (서버, Vercel)
+- `api/sync.js` 관심종목·추가한 신호 저장 (서버, Vercel + Upstash Redis)
 - `js/ta.js` 파인스크립트 ta.* 지표 계산
 - `js/strategy.js` 기본 매수·청산 신호와 차트 지표
 - `js/pine.js` 붙여 넣은 파인스크립트 읽기 (＋ 추가)
@@ -46,4 +49,4 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 - `js/smc.js` LuxAlgo 스마트머니 구조(BOS·CHoCH)
 - `js/app.js` 화면 동작, 자동 가정, OCR, Claude API, 엑셀 내보내기
 
-입력값은 브라우저(localStorage)에만 저장됩니다. 자동 조회는 Vercel 배포에서만 동작하고, GitHub Pages 같은 정적 호스팅에서는 직접 입력하면 됩니다.
+DCF 입력값은 브라우저(localStorage)에만 저장됩니다. 자동 조회는 Vercel 배포에서만 동작하고, GitHub Pages 같은 정적 호스팅에서는 직접 입력하면 됩니다.
