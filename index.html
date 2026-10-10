@@ -25,19 +25,6 @@
   <!-- 결과 한눈에 -->
   <section id="hero" class="hero"></section>
 
-  <!-- 차트 (트레이딩뷰) -->
-  <section class="card" id="chart-card" hidden>
-    <h2>차트 · 매수 신호 <span class="muted small">RSI-2 · PWMA · SMC · 스토캐스틱</span><button type="button" id="btn-chart-big" class="ghost mini big-btn">크게 보기 ⤢</button></h2>
-    <div id="signal-box" class="signal-box">
-      <div class="sig-head"><span id="sig-badge" class="sig-badge">신호 계산 중…</span><span id="sig-name" class="muted small"></span></div>
-      <p id="sig-last" class="sig-last"></p>
-      <p id="sig-stats" class="sig-stats small"></p>
-      <ul id="sig-ind" class="sig-ind"></ul>
-      <details id="sig-more" hidden><summary>최근 신호 보기</summary><div class="table-scroll"><table class="grid" id="sig-table"></table></div></details>
-      <p class="hint">일봉 종가 기준으로 사이트에서 직접 계산합니다 (야후 주가). 장이 열려 있는 동안은 오늘 봉이 아직 끝나지 않아 신호가 바뀔 수 있습니다. 투자 판단은 본인 책임입니다.</p>
-    </div>
-    <div id="sig-chart" class="sig-chart"></div>
-  </section>
 
   <!-- 1. 매출 추정치 캡처 -->
   <section class="card">
@@ -150,7 +137,9 @@
     <aside class="wl">
       <form id="wl-form" class="wl-form"><input id="wl-input" placeholder="티커 추가" autocomplete="off" autocapitalize="characters"><button type="submit" class="mini">추가</button></form>
       <p class="wl-title muted small">관심종목 <span class="muted">(이 브라우저에 저장)</span></p>
+      <label class="wl-only small"><input type="checkbox" id="wl-only"> 오늘 매수·청산 신호 종목만</label>
       <ul id="wl-list" class="wl-list"></ul>
+      <p id="wl-none" class="muted small" hidden>오늘 이 신호가 난 종목이 없습니다.</p>
     </aside>
     <section class="modal-main">
       <div class="modal-head">
@@ -158,8 +147,16 @@
         <div class="tabs"><button type="button" data-tab="sig" class="on">신호 차트</button><button type="button" data-tab="tv">트레이딩뷰</button></div>
         <button type="button" id="modal-close" class="ghost mini">닫기 ✕</button>
       </div>
+      <div class="strat-pick modal-pick"></div>
       <div id="modal-sig" class="modal-chart"></div>
       <div id="modal-tv" class="modal-chart" hidden></div>
+      <details id="modal-info" class="modal-info">
+        <summary>신호 자세히 <span class="muted small">마지막 신호 · 지난 성적 · 보조 지표 · 최근 신호</span></summary>
+        <div id="sig-strats"></div>
+        <ul id="sig-ind" class="sig-ind"></ul>
+        <details id="sig-more" hidden><summary>최근 신호 보기</summary><div class="table-scroll"><table class="grid" id="sig-table"></table></div></details>
+        <p class="hint">일봉 종가 기준으로 사이트에서 직접 계산합니다 (야후 주가). 장이 열려 있는 동안은 오늘 봉이 아직 끝나지 않아 신호가 바뀔 수 있습니다. 투자 판단은 본인 책임입니다.</p>
+      </details>
     </section>
   </div>
 </div>

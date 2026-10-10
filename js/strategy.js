@@ -1,22 +1,55 @@
 // 매수·청산 신호 조건과 보조 지표. 사용자의 트레이딩뷰 파인스크립트를 그대로 옮긴 것이다.
 // d = { time, open, high, low, close, volume } (일봉 배열), ta = 파인스크립트 ta.* 와 같은 함수 모음 (js/ta.js)
 
-// 매매 전략: "RSI-2 평균회귀" (strategy). run()은 봉마다 true/false 인 buy·exit 배열을 돌려준다.
-// 트레이딩뷰 strategy처럼 주문은 다음 봉 시가에 체결되고, 이미 보유 중이면 매수 신호를 다시 표시하지 않는다.
-window.STRATEGY = {
-  name: 'RSI-2 평균회귀',
-  desc: 'RSI(2)가 10 아래이고 종가가 200일선 위면 매수, RSI(2)가 70 위면 청산',
-  commission: 0.0005, // 0.05%
-  run(d, ta) {
-    const rsiLen = 2, buyLevel = 10, exitLevel = 70, trendLen = 200;
-    const rsi = ta.rsi(d.close, rsiLen);
-    const trend = ta.sma(d.close, trendLen);
-    return {
-      buy: d.close.map((c, i) => rsi[i] < buyLevel && c > trend[i]),
-      exit: rsi.map(r => r > exitLevel),
-    };
+// 매매 신호 목록. 새 신호(파인스크립트 전략)는 여기에 하나씩 추가한다.
+// id: 저장용 이름(영문), short: 차트·목록에 붙는 짧은 이름, color: 신호마다 구분되는 색
+// run()은 봉마다 true/false 인 buy·exit 배열을 돌려준다. 트레이딩뷰 strategy처럼 주문은 다음 봉 시가에 체결되고,
+// 이미 보유 중이면 매수 신호를 다시 표시하지 않는다.
+window.STRATEGIES = [
+  {
+    id: 'rsi2',
+    name: 'RSI-2 평균회귀',
+    short: 'RSI2',
+    color: '#7e57c2',
+    desc: 'RSI(2)가 10 아래이고 종가가 200일선 위면 매수, RSI(2)가 70 위면 청산',
+    commission: 0.0005, // 0.05%
+    run(d, ta) {
+      const rsiLen = 2, buyLevel = 10, exitLevel = 70, trendLen = 200;
+      const rsi = ta.rsi(d.close, rsiLen);
+      const trend = ta.sma(d.close, trendLen);
+      return {
+        buy: d.close.map((c, i) => rsi[i] < buyLevel && c > trend[i]),
+        exit: rsi.map(r => r > exitLevel),
+      };
+    },
   },
-};
+  {
+    id: 'stoch-x',
+    name: '스토캐스틱 교차 (예시)',
+    short: '스토',
+    color: '#f57c00',
+    desc: '%K가 20 아래에서 %D를 위로 교차하면 매수, 80 위에서 아래로 교차하면 청산 (사용자 확인 전 예시 조건)',
+    commission: 0.0005,
+    run(d, ta) {
+      const { k, d: dd } = window.IND.stoch(d, ta);
+      const up = ta.crossover(k, dd), dn = ta.crossunder(k, dd);
+      return { buy: k.map((v, i) => up[i] && v < 20), exit: k.map((v, i) => dn[i] && v > 80) };
+    },
+  },
+  {
+    id: 'smc-choch',
+    name: 'SMC 내부 구조 전환 (예시)',
+    short: 'SMC',
+    color: '#d81b60',
+    desc: 'LuxAlgo SMC 내부 구조가 Bullish CHoCH면 매수, Bearish CHoCH면 청산 (사용자 확인 전 예시 조건)',
+    commission: 0.0005,
+    run(d) {
+      const n = d.close.length, buy = new Array(n).fill(false), exit = new Array(n).fill(false);
+      window.SMC.structure(d).internal.events.forEach(e => { if (e.tag === 'CHoCH') (e.bull ? buy : exit)[e.i] = true; });
+      return { buy, exit };
+    },
+  },
+];
 
 // 보조 지표 계산 (차트에 그릴 때도 씀). 설정값은 사용자 트레이딩뷰 차트와 같게.
 window.IND = {
