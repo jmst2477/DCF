@@ -89,9 +89,12 @@
     candleMarks.sort((a, b) => a.i - b.i);
     LC.createSeriesMarkers(candles, candleMarks.map(({ i, ...m }) => m));
 
-    const panes = chart.panes();
-    const subH = Math.round(el.clientHeight * (panes.length > 2 ? 0.18 : 0.24));
-    panes.slice(1).forEach(p => p.setHeight(subH));
+    // 칸 비율: 아래 칸(지표)들은 같은 높이, 가격 칸이 나머지
+    const panes = chart.panes(), sub = panes.length > 2 ? 0.18 : 0.24;
+    if (panes.length > 1) {
+      panes[0].setStretchFactor(1 - sub * (panes.length - 1));
+      panes.slice(1).forEach(p => p.setStretchFactor(sub));
+    }
     chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 });
 
     // 왼쪽 위 범례

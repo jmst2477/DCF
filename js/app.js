@@ -1085,7 +1085,15 @@
   // 관심종목은 이 브라우저에만 저장됩니다 (localStorage).
   const WL_KEY = 'dcf-watchlist';
   const loadWl = () => { try { const a = JSON.parse(localStorage.getItem(WL_KEY)); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch (e) { return []; } };
-  const saveWl = a => { try { localStorage.setItem(WL_KEY, JSON.stringify(a)); } catch (e) { /* 저장 불가 */ } };
+  const saveWl = a => { try { localStorage.setItem(WL_KEY, JSON.stringify(a)); } catch (e) { /* 저장 불가 */ } markDirty(); };
+  // 같이 쓰기 (아래 /api/sync 부분): 바뀌면 잠시 뒤 서버에 저장
+  const SYNC_PW = 'dcf-sync-pw', SYNC_DIRTY = 'dcf-sync-dirty';
+  let syncPw = (() => { try { return localStorage.getItem(SYNC_PW) || ''; } catch (e) { return ''; } })(), syncTimer = null, syncApplying = false;
+  function markDirty() {
+    if (syncApplying) return;
+    lsSet(SYNC_DIRTY, true);
+    if (syncPw) { clearTimeout(syncTimer); syncTimer = setTimeout(pushSync, 600); }
+  }
   let watch = loadWl(), modalTicker = null, modalChart = null, modalTab = 'sig', tvTicker = null;
 
   function openModal(t) {
@@ -1287,6 +1295,7 @@
     if (!draft) return;
     customs.push(draft);
     lsSet(CUSTOM_KEY, customs);
+    markDirty();
     mountCustoms();
     if (draft.kind === 'strategy') { stratSel = draft.id; lsSet('dcf-strategy-id', stratSel); } else { indOff = indOff.filter(x => x !== draft.id); lsSet('dcf-indicators-off', indOff); }
     draft = null;
@@ -1304,12 +1313,101 @@
     if (!it || !confirm(`'${it.name}'을(를) 지울까요?`)) return;
     customs = customs.filter(x => x.id !== it.id);
     lsSet(CUSTOM_KEY, customs);
+    markDirty();
     mountCustoms();
     renderCustomList();
     renderPickers();
     renderWatch();
     if (modalTicker) showModalTicker(modalTicker);
   });
+
+  // ---------- PC·휴대폰 같이 쓰기 (/api/sync, Upstash Redis): 관심종목 + "＋ 추가"로 넣은 신호·지표 ----------
+  // 처음 연결할 때 서버 것과 이 기기 것을 합치고, 그 뒤로는 서버가 기준. 바꿀 때마다 바로 서버에 저장.
+  const localState = () => ({ watch: watch.slice(), customs: customs.map(({ id, kind, name, color, desc, code }) => ({ id, kind, name, color, desc, code })) });
+  const sameState = (a, b) => JSON.stringify(a.watch) === JSON.stringify(b.watch) && JSON.stringify(a.customs.map(x => x.id)) === JSON.stringify(b.customs.map(x => x.id));
+  const hhmm = () => new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  function syncStatus(txt, bad) {
+    const el = $('#sync-status');
+    el.textContent = txt;
+    el.classList.toggle('neg', !!bad);
+    $('#sync-btn').textContent = syncPw ? '끊기' : '연결';
+  }
+  async function syncCall(action, extra) {
+    const res = await fetch('api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, password: syncPw, ...extra }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error(j.error || '서버 오류 ' + res.status); e.status = res.status; throw e; }
+    return j;
+  }
+  function applyState(s) {
+    syncApplying = true;
+    watch = s.watch.slice();
+    saveWl(watch);
+    customs = s.customs.slice();
+    lsSet(CUSTOM_KEY, customs);
+    syncApplying = false;
+    mountCustoms();
+    renderPickers();
+    if (!$('#chart-modal').hidden) { renderWatch(); if (modalTicker) showModalTicker(modalTicker); }
+  }
+  const union = (srv, loc) => ({
+    watch: srv.watch.concat(loc.watch.filter(t => !srv.watch.includes(t))),
+    customs: srv.customs.concat(loc.customs.filter(x => !srv.customs.some(y => y.id === x.id))),
+  });
+  async function pushSync() {
+    clearTimeout(syncTimer);
+    if (!syncPw) return;
+    try {
+      await syncCall('push', { state: localState() });
+      lsSet(SYNC_DIRTY, false);
+      syncStatus(`☁ 같이 쓰는 중 · ${hhmm()} 저장됨`);
+    } catch (e) { syncStatus('☁ 저장 실패: ' + (e.message || e), true); }
+  }
+  // first = 처음 연결(합치기), 아니면 서버 것을 그대로 가져옴 (이 기기에 못 올린 변경이 있으면 합침)
+  async function pullSync(first) {
+    const j = await syncCall('pull');
+    const loc = localState();
+    if (!j.state) { await pushSync(); return j; }
+    const merged = first || lsGet(SYNC_DIRTY, false) ? union(j.state, loc) : { watch: j.state.watch, customs: j.state.customs };
+    if (!sameState(merged, loc)) applyState(merged);
+    if (!sameState(merged, j.state)) await pushSync(); else { lsSet(SYNC_DIRTY, false); syncStatus(`☁ 같이 쓰는 중 · ${hhmm()} 불러옴`); }
+    return j;
+  }
+  $('#sync-btn').addEventListener('click', () => {
+    if (syncPw) {
+      if (!confirm('이 기기의 같이 쓰기를 끌까요? (지금 목록은 이 기기에 그대로 남습니다)')) return;
+      syncPw = '';
+      try { localStorage.removeItem(SYNC_PW); } catch (e) { /* ignore */ }
+      syncStatus('☁ PC·휴대폰 같이 쓰기 꺼짐');
+      return;
+    }
+    const f = $('#sync-form');
+    f.hidden = !f.hidden;
+    if (!f.hidden) $('#sync-pw').focus();
+  });
+  $('#sync-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const pw = $('#sync-pw').value;
+    if (pw.length < 4) { syncStatus('비밀번호는 4자 이상', true); return; }
+    syncPw = pw;
+    syncStatus('☁ 연결 중…');
+    try {
+      const j = await pullSync(true);
+      try { localStorage.setItem(SYNC_PW, pw); } catch (x) { /* ignore */ }
+      $('#sync-pw').value = '';
+      $('#sync-form').hidden = true;
+      syncStatus(j.created ? `☁ 새 비밀번호로 시작 · ${hhmm()} 저장됨` : `☁ 같이 쓰는 중 · ${hhmm()} 불러옴`);
+    } catch (x) {
+      syncPw = '';
+      syncStatus('☁ ' + (x.message || x), true);
+    }
+  });
+  if (syncPw) {
+    syncStatus('☁ 불러오는 중…');
+    pullSync(false).catch(e => {
+      if (e.status === 401) { syncPw = ''; try { localStorage.removeItem(SYNC_PW); } catch (x) { /* ignore */ } }
+      syncStatus('☁ 불러오기 실패: ' + (e.message || e), true);
+    });
+  } else syncStatus('☁ PC·휴대폰 같이 쓰기 꺼짐');
 
   syncMode();
   renderAll();
