@@ -24,7 +24,13 @@
 
   <!-- 차트 (트레이딩뷰) -->
   <section class="card" id="chart-card" hidden>
-    <h2>차트 <span class="muted small">트레이딩뷰</span></h2>
+    <h2>차트 · 매수 신호 <span class="muted small">트레이딩뷰</span></h2>
+    <div id="signal-box" class="signal-box">
+      <div class="sig-head"><span id="sig-badge" class="sig-badge">신호 계산 중…</span><span id="sig-name" class="muted small"></span></div>
+      <p id="sig-last" class="sig-last"></p>
+      <details id="sig-more" hidden><summary>최근 신호 보기</summary><div class="table-scroll"><table class="grid" id="sig-table"></table></div></details>
+      <p class="hint">일봉 종가 기준으로 사이트에서 직접 계산합니다 (야후 주가). 장이 열려 있는 동안은 오늘 봉이 아직 끝나지 않아 신호가 바뀔 수 있습니다. 투자 판단은 본인 책임입니다.</p>
+    </div>
     <div id="tv-chart" class="tv-chart"></div>
   </section>
 
@@ -142,6 +148,8 @@
 <script src="js/dcf.js"></script>
 <script src="js/parser.js"></script>
 <script src="js/sapdf.js"></script>
+<script src="js/ta.js"></script>
+<script src="js/strategy.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

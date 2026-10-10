@@ -288,6 +288,63 @@
       style: '1', allow_symbol_change: false, hide_side_toolbar: false, withdateranges: true, support_host: 'https://www.tradingview.com',
     });
     box.firstChild.appendChild(sc);
+    renderSignals(t);
+  }
+
+  // ---------- 매수 신호 (js/strategy.js 조건을 야후 일봉으로 계산) ----------
+  const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
+  function findSignals(d, strat) {
+    const out = strat.run(d, window.TA);
+    const list = [];
+    d.close.forEach((c, i) => {
+      if (out.buy && out.buy[i]) list.push({ i, kind: 'buy' });
+      else if (out.sell && out.sell[i]) list.push({ i, kind: 'sell' });
+    });
+    return list;
+  }
+  async function renderSignals(t) {
+    const strat = window.STRATEGY;
+    $('#sig-name').textContent = strat ? strat.name + ' · ' + strat.desc : '';
+    $('#sig-badge').className = 'sig-badge';
+    $('#sig-badge').textContent = '신호 계산 중…';
+    $('#sig-last').textContent = '';
+    $('#sig-more').hidden = true;
+    let d;
+    try {
+      const res = await fetch('api/prices?ticker=' + encodeURIComponent(t));
+      d = await res.json();
+      if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
+    } catch (e) {
+      if (chartTicker === t) { $('#sig-badge').textContent = '신호 계산 불가'; $('#sig-last').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e); }
+      return;
+    }
+    if (chartTicker !== t) return; // 그 사이 다른 종목으로 바뀜
+    let list;
+    try { list = findSignals(d, strat); } catch (e) {
+      $('#sig-badge').textContent = '신호 계산 불가'; $('#sig-last').textContent = '조건 계산 오류: ' + (e.message || e); return;
+    }
+    const n = d.close.length, last = d.close[n - 1];
+    const latest = list[list.length - 1];
+    const badge = $('#sig-badge');
+    if (latest && latest.i === n - 1) {
+      badge.className = 'sig-badge ' + latest.kind;
+      badge.textContent = latest.kind === 'buy' ? '오늘 매수 신호' : '오늘 매도 신호';
+    } else {
+      badge.className = 'sig-badge none';
+      badge.textContent = '오늘은 신호 없음';
+    }
+    if (latest) {
+      const days = n - 1 - latest.i;
+      $('#sig-last').innerHTML = `마지막 신호: <b>${latest.kind === 'buy' ? '매수' : '매도'}</b> · ${d.time[latest.i]}${days ? ` (${days}거래일 전)` : ''} · ${fmtP(d.close[latest.i])}` +
+        (days ? ` → 지금 ${fmtP(last)} ${fmtR(last / d.close[latest.i] - 1)}` : '');
+      const rows = list.slice(-10).reverse().map(s =>
+        `<tr><td>${d.time[s.i]}</td><td><span class="sig-tag ${s.kind}">${s.kind === 'buy' ? '매수' : '매도'}</span></td><td>${fmtP(d.close[s.i])}</td><td>${s.i === n - 1 ? '-' : fmtR(last / d.close[s.i] - 1)}</td></tr>`).join('');
+      $('#sig-table').innerHTML = `<thead><tr><th>날짜</th><th>신호</th><th>그날 종가</th><th>지금까지</th></tr></thead><tbody>${rows}</tbody>`;
+      $('#sig-more').hidden = false;
+    } else {
+      $('#sig-last').textContent = `최근 ${d.time[0]} 이후로 신호가 한 번도 없었습니다.`;
+    }
   }
 
   function recalc() {
