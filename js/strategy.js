@@ -18,19 +18,32 @@ window.STRATEGY = {
   },
 };
 
+// 보조 지표 계산 (차트에 그릴 때도 씀). 설정값은 사용자 트레이딩뷰 차트와 같게.
+window.IND = {
+  pwmaLen: 14, pwmaPower: 2,
+  stochK: 5, stochSmooth: 3, stochD: 3,
+  // Parabolic Weighted Moving Average (everget): 최근 값일수록 (length - i)^power 가중
+  pwma(src, length = this.pwmaLen, power = this.pwmaPower) {
+    return src.map((_, i) => {
+      if (i < length - 1) return NaN;
+      let sum = 0, w = 0;
+      for (let k = 0; k < length; k++) { const wt = Math.pow(length - k, power); sum += src[i - k] * wt; w += wt; }
+      return sum / w;
+    });
+  },
+  // 트레이딩뷰 기본 스토캐스틱: k = sma(stoch(close, high, low, periodK), smoothK), d = sma(k, periodD)
+  stoch(d, ta) {
+    const k = ta.sma(ta.stoch(d.close, d.high, d.low, this.stochK), this.stochSmooth);
+    return { k, d: ta.sma(k, this.stochD) };
+  },
+};
+
 // 보조 지표: 매수 조건이 없는 지표는 마지막 봉 상태만 글로 보여 준다. tone: 'up'(빨강) | 'down'(파랑) | ''
 window.INDICATORS = [
   {
     name: 'PWMA (14, 2)',
     run(d) {
-      // Parabolic Weighted Moving Average (everget): 최근 값일수록 (length - i)^power 가중
-      const length = 14, power = 2, src = d.close;
-      const pwma = src.map((_, i) => {
-        if (i < length - 1) return NaN;
-        let sum = 0, w = 0;
-        for (let k = 0; k < length; k++) { const wt = Math.pow(length - k, power); sum += src[i - k] * wt; w += wt; }
-        return sum / w;
-      });
+      const pwma = window.IND.pwma(d.close);
       const n = pwma.length - 1, up = pwma[n] > pwma[n - 1];
       let run = 0;
       for (let i = n; i > 0 && (pwma[i] > pwma[i - 1]) === up; i--) run++;
@@ -38,10 +51,9 @@ window.INDICATORS = [
     },
   },
   {
-    name: '스토캐스틱 (14, 1, 3)',
+    name: '스토캐스틱 (5, 3, 3)',
     run(d, ta) {
-      const k = ta.sma(ta.stoch(d.close, d.high, d.low, 14), 1);
-      const dd = ta.sma(k, 3);
+      const { k, d: dd } = window.IND.stoch(d, ta);
       const n = k.length - 1;
       const zone = k[n] >= 80 ? '과매수(80 위)' : k[n] <= 20 ? '과매도(20 아래)' : '중간';
       const xo = ta.crossover(k, dd), xu = ta.crossunder(k, dd);

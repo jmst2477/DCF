@@ -127,6 +127,7 @@
 
   // ---------- 표시 형식 ----------
   const $ = sel => document.querySelector(sel);
+  const $$ = sel => [...document.querySelectorAll(sel)];
   const fmt = (v, d = 0) => (v == null || !Number.isFinite(v) ? '–' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
   const pct = (v, d = 1) => (v == null || !Number.isFinite(v) ? '–' : (v * 100).toFixed(d) + '%');
   const toInput = (v, isPct) => (isPct ? +(v * 100).toFixed(4) : v);
@@ -277,7 +278,10 @@
     $('#chart-card').hidden = !t;
     if (!t || t === chartTicker) return;
     chartTicker = t;
-    const box = $('#tv-chart');
+    renderSignals(t);
+  }
+  // 트레이딩뷰 무료 위젯 (큰 화면의 "트레이딩뷰" 탭)
+  function loadTv(box, t) {
     box.innerHTML = '<div class="tradingview-widget-container" style="height:100%;width:100%"><div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div></div>';
     const sc = document.createElement('script');
     sc.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
@@ -288,7 +292,6 @@
       style: '1', allow_symbol_change: false, hide_side_toolbar: false, withdateranges: true, support_host: 'https://www.tradingview.com',
     });
     box.firstChild.appendChild(sc);
-    renderSignals(t);
   }
 
   // ---------- 매수 신호 (js/strategy.js 조건을 야후 일봉으로 계산) ----------
@@ -309,6 +312,30 @@
     }
     return { out, marks, trades, pos, entry };
   }
+  // 종목별 일봉 + 신호 계산 (한 번 받은 종목은 다시 받지 않음)
+  const sigCache = {};
+  function getSig(t) {
+    if (!sigCache[t]) {
+      sigCache[t] = fetch('api/prices?range=5y&ticker=' + encodeURIComponent(t))
+        .then(async res => {
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
+          return { d, sim: simulate(d, window.STRATEGY) };
+        });
+      sigCache[t].catch(() => delete sigCache[t]); // 실패하면 다음에 다시 시도
+    }
+    return sigCache[t];
+  }
+  // 마지막 봉 기준 상태: 오늘 매수 / 오늘 청산 / 보유 구간 / 신호 없음
+  function sigState({ d, sim }) {
+    const L = d.close.length - 1;
+    if (sim.out.buy[L]) return { cls: 'buy', text: '오늘 매수 신호', short: '매수' };
+    if (sim.out.exit[L] && sim.pos) return { cls: 'sell', text: '오늘 청산 신호', short: '청산' };
+    if (sim.pos) return { cls: 'hold', text: '보유 구간 · 청산 신호 기다리는 중', short: '보유' };
+    return { cls: 'none', text: '오늘은 신호 없음', short: '' };
+  }
+  let inlineChart = null;
+
   async function renderSignals(t) {
     const strat = window.STRATEGY;
     $('#sig-name').textContent = strat ? strat.name + ' · ' + strat.desc : '';
@@ -318,26 +345,20 @@
     $('#sig-stats').textContent = '';
     $('#sig-ind').innerHTML = '';
     $('#sig-more').hidden = true;
-    let d;
+    let d, sim;
     try {
-      const res = await fetch('api/prices?range=5y&ticker=' + encodeURIComponent(t));
-      d = await res.json();
-      if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
+      ({ d, sim } = await getSig(t));
     } catch (e) {
       if (chartTicker === t) { $('#sig-badge').textContent = '신호 계산 불가'; $('#sig-last').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e); }
       return;
     }
     if (chartTicker !== t) return; // 그 사이 다른 종목으로 바뀜
-    let sim;
-    try { sim = simulate(d, strat); } catch (e) {
-      $('#sig-badge').textContent = '신호 계산 불가'; $('#sig-last').textContent = '조건 계산 오류: ' + (e.message || e); return;
-    }
+    if (inlineChart) inlineChart.remove();
+    inlineChart = window.SigChart.draw($('#sig-chart'), d, sim, { bars: 90 });
     const n = d.close.length, L = n - 1, last = d.close[L];
-    const badge = $('#sig-badge');
-    if (sim.out.buy[L]) { badge.className = 'sig-badge buy'; badge.textContent = '오늘 매수 신호'; }
-    else if (sim.out.exit[L] && sim.pos) { badge.className = 'sig-badge sell'; badge.textContent = '오늘 청산 신호'; }
-    else if (sim.pos) { badge.className = 'sig-badge hold'; badge.textContent = '보유 구간 · 청산 신호 기다리는 중'; }
-    else { badge.className = 'sig-badge none'; badge.textContent = '오늘은 신호 없음'; }
+    const st = sigState({ d, sim });
+    $('#sig-badge').className = 'sig-badge ' + st.cls;
+    $('#sig-badge').textContent = st.text;
 
     const latest = sim.marks[sim.marks.length - 1];
     if (latest) {
@@ -1009,6 +1030,100 @@
     renderBasicForm();
     recalc();
   }
+
+  // ---------- 크게 보기 (제목 옆 "차트" 버튼) + 관심종목 ----------
+  // 관심종목은 이 브라우저에만 저장됩니다 (localStorage).
+  const WL_KEY = 'dcf-watchlist';
+  const loadWl = () => { try { const a = JSON.parse(localStorage.getItem(WL_KEY)); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch (e) { return []; } };
+  const saveWl = a => { try { localStorage.setItem(WL_KEY, JSON.stringify(a)); } catch (e) { /* 저장 불가 */ } };
+  let watch = loadWl(), modalTicker = null, modalChart = null, modalTab = 'sig', tvTicker = null;
+
+  function openModal(t) {
+    t = (t || state.ticker || watch[0] || '').trim().toUpperCase();
+    $('#chart-modal').hidden = false;
+    document.body.classList.add('modal-open');
+    renderWatch();
+    if (t) showModalTicker(t);
+    else $('#modal-sig').innerHTML = '<p class="muted" style="padding:24px">왼쪽에 관심종목을 추가하거나, 위 검색창에서 종목을 계산하세요.</p>';
+  }
+  function closeModal() {
+    $('#chart-modal').hidden = true;
+    document.body.classList.remove('modal-open');
+    if (modalChart) { modalChart.remove(); modalChart = null; }
+  }
+  async function showModalTicker(t) {
+    modalTicker = t;
+    renderWatch();
+    $('#modal-title').textContent = t;
+    $('#modal-sub').textContent = '불러오는 중…';
+    $('#modal-sub').className = 'modal-sub';
+    if (modalTab === 'tv') { tvTicker = t; loadTv($('#modal-tv'), t); }
+    else tvTicker = null;
+    if (modalChart) { modalChart.remove(); modalChart = null; }
+    $('#modal-sig').innerHTML = '';
+    try {
+      const r = await getSig(t);
+      if (modalTicker !== t || $('#chart-modal').hidden) return;
+      const st = sigState(r), L = r.d.close.length - 1;
+      const chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
+      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)} · <span class="sig-tag ${st.cls}">${st.text}</span> <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
+      modalChart = window.SigChart.draw($('#modal-sig'), r.d, r.sim, { bars: 160 });
+    } catch (e) {
+      if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
+    }
+  }
+  function setTab(tab) {
+    modalTab = tab;
+    $$('#chart-modal .tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+    $('#modal-sig').hidden = tab !== 'sig';
+    $('#modal-tv').hidden = tab !== 'tv';
+    if (tab === 'tv' && modalTicker && tvTicker !== modalTicker) { tvTicker = modalTicker; loadTv($('#modal-tv'), modalTicker); }
+  }
+  function renderWatch() {
+    const list = $('#wl-list');
+    const cur = (state.ticker || '').trim().toUpperCase();
+    const items = cur && !watch.includes(cur) ? [cur, ...watch] : watch;
+    list.innerHTML = items.length ? items.map(t => `
+      <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}">
+        <button type="button" class="wl-pick"><b>${esc(t)}</b><span class="wl-val" data-v="${esc(t)}">…</span></button>
+        ${watch.includes(t) ? `<button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
+      </li>`).join('') : '<li class="muted small wl-empty">관심종목이 없습니다. 위에 티커를 넣고 추가하세요.</li>';
+    items.forEach(t => getSig(t).then(r => {
+      const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
+      if (!el) return;
+      const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0, st = sigState(r);
+      el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}`;
+    }, () => {
+      const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
+      if (el) el.innerHTML = '<span class="muted">조회 실패</span>';
+    }));
+  }
+  function addWatch(t) {
+    t = (t || '').trim().toUpperCase();
+    if (!/^[A-Z0-9.\-^=]{1,15}$/.test(t)) return false;
+    if (!watch.includes(t)) { watch.push(t); saveWl(watch); }
+    return true;
+  }
+
+  $('#btn-chart').addEventListener('click', () => openModal());
+  $('#btn-chart-big').addEventListener('click', () => openModal(chartTicker));
+  $('#modal-close').addEventListener('click', closeModal);
+  $('#chart-modal').addEventListener('click', e => { if (e.target.id === 'chart-modal') closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#chart-modal').hidden) closeModal(); });
+  $$('#chart-modal .tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  $('#wl-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const t = $('#wl-input').value.trim().toUpperCase();
+    if (!addWatch(t)) return;
+    $('#wl-input').value = '';
+    showModalTicker(t);
+  });
+  $('#wl-list').addEventListener('click', e => {
+    const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), pick = e.target.closest('.wl-pick');
+    if (del) { watch = watch.filter(x => x !== del.dataset.del); saveWl(watch); renderWatch(); return; }
+    if (add) { addWatch(add.dataset.add); renderWatch(); return; }
+    if (pick) showModalTicker(pick.closest('li').dataset.t);
+  });
 
   syncMode();
   renderAll();
