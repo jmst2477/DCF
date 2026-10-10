@@ -651,11 +651,6 @@
     });
   }
   document.addEventListener('paste', e => {
-    // 북마클릿이 복사해 둔 시킹알파 자료
-    const txt = e.clipboardData && e.clipboardData.getData('text/plain');
-    if (txt && txt.includes('"dcf-sa"')) {
-      try { const d = JSON.parse(txt); if (d.type === 'dcf-sa') { e.preventDefault(); receiveSA(d); return; } } catch (x) { /* 일반 글자 */ }
-    }
     const item = [...(e.clipboardData || {}).items || []].find(x => x.type.startsWith('image/'));
     if (!item) return;
     e.preventDefault();
@@ -997,143 +992,9 @@
     recalc();
   }
 
-  // ---------- 시킹알파 자동 가져오기 (북마클릿) ----------
-  // 사용자가 로그인한 시킹알파 페이지에서 북마크를 누르면, 그 브라우저 안에서 시킹알파 자료를 읽어 이 창으로 보냅니다.
-  // 비밀번호나 로그인 정보는 이 사이트로 오지 않습니다.
-  const SA_ORIGIN = 'https://seekingalpha.com';
-
-  /* 시킹알파 페이지에서 실행되는 코드 (북마클릿으로 문자열이 되어 들어가므로 바깥 변수를 쓰면 안 됨) */
-  function saGrab(site) {
-    if (!/(^|\.)seekingalpha\.com$/.test(location.hostname)) { alert('시킹알파 종목 페이지에서 눌러 주세요.'); return; }
-    const m = location.pathname.match(/\/symbol\/([^/?#]+)/i);
-    let t = m ? decodeURIComponent(m[1]) : prompt('티커를 입력하세요', '');
-    if (!t) return;
-    t = t.trim().toUpperCase();
-    const w = window.open(site + '?t=' + encodeURIComponent(t) + '&sa=1', 'dcf-calc');
-    const box = document.createElement('div');
-    box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;background:#fff;color:#111;border:2px solid #2563eb;border-radius:10px;padding:12px 14px;font:14px/1.5 sans-serif;max-width:320px;box-shadow:0 6px 24px rgba(0,0,0,.2)';
-    box.textContent = 'DCF: 시킹알파 자료를 읽는 중...';
-    document.body.appendChild(box);
-    const get = u => fetch(u, { credentials: 'include', headers: { accept: 'application/json' } })
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error(u.split('?')[0] + ' ' + r.status))));
-    const items = 'revenue_consensus_mean,eps_normalized_consensus_mean,revenue_actual,eps_normalized_actual';
-    const text = ((document.querySelector('main') || document.body).innerText || '').slice(0, 80000);
-    get('/api/v3/symbols/' + encodeURIComponent(t.toLowerCase()))
-      .then(j => get('/api/v3/symbol_data/estimates?estimates_data_items=' + items + '&period_type=annual&relative_periods=-3,-2,-1,0,1,2,3,4,5,6,7,8,9&ticker_ids=' + j.data.id))
-      .then(est => ({ est }), err => ({ error: String(err && err.message || err) }))
-      .then(r => {
-        const data = Object.assign({ type: 'dcf-sa', v: 1, ticker: t, page: location.href, text }, r);
-        const json = JSON.stringify(data);
-        let sent = false;
-        const origin = new URL(site).origin;
-        const send = () => { if (!sent && w && !w.closed) { w.postMessage(data, origin); } };
-        window.addEventListener('message', e => {
-          if (e.origin !== origin) return;
-          if (e.data === 'dcf-ready') send();
-          if (e.data === 'dcf-got') { sent = true; box.textContent = 'DCF: 보냈습니다. DCF 창을 확인하세요.'; setTimeout(() => box.remove(), 4000); }
-        });
-        send();
-        setTimeout(() => {
-          if (sent) return;
-          box.textContent = 'DCF 창으로 바로 보내지 못했습니다. 아래 버튼을 누른 뒤 DCF 창에서 Ctrl+V 하세요. ';
-          const b = document.createElement('button');
-          b.textContent = '자료 복사';
-          b.style.cssText = 'display:block;margin-top:8px;padding:6px 12px;border-radius:6px;border:0;background:#2563eb;color:#fff;font-weight:600;cursor:pointer';
-          b.onclick = () => navigator.clipboard.writeText(json).then(() => { b.textContent = '복사됨 → DCF 창에서 Ctrl+V'; }, () => prompt('복사해서 DCF 창에 붙여넣으세요', json));
-          box.appendChild(b);
-        }, 5000);
-      });
-  }
-
-  function bookmarkletHref() {
-    const site = location.origin + location.pathname;
-    return 'javascript:' + encodeURIComponent('(' + saGrab.toString() + ')(' + JSON.stringify(site) + ');void 0');
-  }
-  if ($('#sa-bookmarklet')) $('#sa-bookmarklet').href = bookmarkletHref();
-  $('#sa-bookmarklet') && $('#sa-bookmarklet').addEventListener('click', e => { e.preventDefault(); alert('이 버튼은 여기서 누르는 게 아니라, 북마크바로 끌어다 놓은 뒤 시킹알파 종목 페이지에서 누릅니다.'); });
-
-  // 시킹알파 API 응답 → 추정치 행. 응답 모양: estimates[티커ID][항목][상대기간] = [{dataitemvalue, period:{fiscalyear, periodenddate}}]
-  function saEstimatesFromJson(est) {
-    const out = [];
-    const root = est && est.estimates;
-    if (!root) return out;
-    const MET = { revenue_consensus_mean: 'revenue', eps_normalized_consensus_mean: 'eps' };
-    for (const tid of Object.keys(root)) {
-      for (const [item, byRel] of Object.entries(root[tid] || {})) {
-        const metric = MET[item];
-        if (!metric || !byRel) continue;
-        for (const arr of Object.values(byRel)) {
-          const list = (Array.isArray(arr) ? arr : [arr]).filter(x => x && x.dataitemvalue != null && x.period);
-          if (!list.length) continue;
-          // 같은 기간에 여러 번 수정된 값이 있으면 가장 최근 값
-          const x = list.slice().sort((a, b) => String(a.effectivedate || '').localeCompare(String(b.effectivedate || ''))).pop();
-          const pe = x.period.periodenddate || '';
-          const year = /^\d{4}/.test(pe) ? +pe.slice(0, 4) : +x.period.fiscalyear;
-          if (!year) continue;
-          let v = parseFloat(x.dataitemvalue);
-          if (!Number.isFinite(v)) continue;
-          if (metric === 'revenue') v /= 1e6; // 달러 → 백만 달러
-          const label = pe ? new Date(pe + 'T00:00:00Z').toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }) : 'FY' + year;
-          out.push({ metric, year, label, value: v, raw: '시킹알파 자동' });
-        }
-      }
-    }
-    // 같은 항목·연도는 하나만
-    const seen = new Set();
-    return out.filter(e => { const k = e.metric + e.year; if (seen.has(k)) return false; seen.add(k); return true; })
-      .sort((a, b) => (a.metric > b.metric ? 1 : a.metric < b.metric ? -1 : a.year - b.year));
-  }
-
-  let saReceived = false;
-  async function receiveSA(d) {
-    saReceived = true;
-    const st = $('#sa-status');
-    st.textContent = `시킹알파에서 ${d.ticker} 자료를 받았습니다. 계산하는 중...`;
-    if (!state.fromLookup || state.ticker !== d.ticker) await lookup(d.ticker);
-    let found = saEstimatesFromJson(d.est), how = '시킹알파 추정치 자료';
-    // 자료(API)를 못 읽었으면 그 페이지 글자에서 표를 찾음 (Earnings → Estimates 화면일 때)
-    if (!found.some(e => e.metric === 'revenue') && d.text) {
-      const r = SAParser.parseEstimates(d.text);
-      const fromText = r.estimates.filter(e => e.metric === 'revenue' || e.metric === 'eps');
-      if (fromText.length > found.length) { found = fromText.map(e => Object.assign({}, e, { raw: '시킹알파 페이지' })); how = '시킹알파 페이지 글자'; }
-    }
-    if (!found.length) {
-      st.innerHTML = '<span class="neg">추정치를 찾지 못했습니다.</span> 시킹알파에서 <b>Earnings → Estimates → Annual</b> 화면을 연 뒤 북마크를 다시 누르거나, 아래 캡처 칸을 쓰세요.' +
-        (d.error ? ` <span class="muted">(${esc(d.error)})</span>` : '');
-      return;
-    }
-    estimates = found.map(e => Object.assign({ use: true, slot: 'auto' }, e));
-    renderEstimates([], '');
-    $('#btn-apply').click();
-    const cnt = m => found.filter(e => e.metric === m).length;
-    st.textContent = `${how}에서 매출 ${cnt('revenue')}개, EPS ${cnt('eps')}개를 넣고 계산했습니다. 아래 표에서 값을 확인할 수 있습니다.`;
-  }
-
-  window.addEventListener('message', e => {
-    if (e.origin !== SA_ORIGIN || !e.data || e.data.type !== 'dcf-sa') return;
-    try { e.source && e.source.postMessage('dcf-got', SA_ORIGIN); } catch (x) { /* ignore */ }
-    if (!saReceived) receiveSA(e.data);
-  });
-
-  // 북마클릿이 연 창: 시킹알파 창에 준비됐다고 알리고 자료를 기다림
-  function waitForSA(ticker) {
-    $('#sa-status').textContent = '시킹알파 자료를 기다리는 중...';
-    let n = 0;
-    const timer = setInterval(() => {
-      if (saReceived) return clearInterval(timer);
-      try { window.opener && window.opener.postMessage('dcf-ready', SA_ORIGIN); } catch (x) { /* ignore */ }
-      if (++n === 16) {
-        $('#sa-status').textContent = '시킹알파 창에서 "자료 복사"를 누른 뒤 여기서 Ctrl+V 하세요.';
-        if (ticker) lookup(ticker);
-      }
-      if (n > 60) clearInterval(timer);
-    }, 500);
-  }
-
   syncMode();
   renderAll();
   if (state.info && state.info.history) renderHistory(state.info);
   const qs = new URLSearchParams(location.search), qt = qs.get('t');
-  if (qs.get('sa') && window.opener) waitForSA(qt);
-  else if (qt) lookup(qt);
+  if (qt) lookup(qt);
 })();
