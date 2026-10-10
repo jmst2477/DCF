@@ -17,8 +17,10 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 
 ## 차트 · 매수 신호
 - 종목을 조회하면 트레이딩뷰 차트(무료 위젯)가 나옵니다.
-- 매수 신호는 사이트에서 직접 계산합니다: `/api/prices` (Vercel 함수, 야후 일봉 약 2년치) → `js/strategy.js`의 조건. 마지막 봉에서 조건이 맞으면 "오늘 매수 신호", 아니면 마지막 신호 날짜·가격과 그 뒤 등락을 보여 줍니다.
-- 조건 바꾸기: 트레이딩뷰 파인스크립트 조건을 `js/strategy.js`의 `run()`으로 옮깁니다. `js/ta.js`에 파인스크립트와 같은 계산의 `ta.sma / ema / rma / wma / rsi / macd / bb / stdev / atr / stoch / highest / lowest / crossover / crossunder`가 있습니다. 지금은 예시로 골든크로스(20일선이 60일선을 위로 뚫음)가 들어 있습니다.
+- 매수 신호는 사이트에서 직접 계산합니다: `/api/prices` (Vercel 함수, 야후 일봉 약 5년치) → `js/strategy.js`.
+- 매매 전략: 사용자의 트레이딩뷰 전략 "RSI-2 평균회귀"를 그대로 옮겼습니다. RSI(2) < 10 이고 종가가 200일선 위면 매수, RSI(2) > 70이면 청산. 트레이딩뷰처럼 다음 날 시가에 체결된다고 보고, 보유 중에는 매수 표시를 다시 하지 않습니다. 오늘 매수 신호 / 오늘 청산 신호 / 보유 구간 / 신호 없음과 최근 신호, 이 조건대로 사고팔았을 때의 거래 수·승률·누적 수익(수수료 0.05%)을 보여 줍니다.
+- 보조 지표(매수 조건이 없는 지표는 지금 상태만): PWMA(14, 2) 상승·하락, 스토캐스틱(14, 1, 3) %K·%D와 과매수·과매도, LuxAlgo 스마트머니 구조의 BOS·CHoCH(`js/smc.js`, 구조 판단만 옮김, CC BY-NC-SA 4.0).
+- 조건 바꾸기: `js/strategy.js`의 `run()`을 고칩니다. `js/ta.js`에 파인스크립트와 같은 계산의 `ta.sma / ema / rma / wma / rsi / macd / bb / stdev / atr / stoch / highest / lowest / crossover / crossunder`가 있습니다.
 
 화면은 토스증권처럼 회색 바탕에 흰 카드, 오르면 빨강·내리면 파랑입니다.
 
@@ -30,7 +32,8 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 - `js/sapdf.js` 시킹알파 재무제표 PDF → 실적·대차대조표 값
 - `api/prices.js` 티커 → 일봉 주가 (서버, Vercel)
 - `js/ta.js` 파인스크립트 ta.* 지표 계산
-- `js/strategy.js` 매수·매도 신호 조건
+- `js/strategy.js` 매수·청산 신호 조건과 보조 지표
+- `js/smc.js` LuxAlgo 스마트머니 구조(BOS·CHoCH)
 - `js/app.js` 화면 동작, 자동 가정, OCR, Claude API, 엑셀 내보내기
 
 입력값은 브라우저(localStorage)에만 저장됩니다. 자동 조회는 Vercel 배포에서만 동작하고, GitHub Pages 같은 정적 호스팅에서는 직접 입력하면 됩니다.
