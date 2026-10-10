@@ -183,3 +183,6 @@ a.bookmarklet { display: inline-block; padding: 4px 12px; border-radius: 8px; ba
 .slot .drop img { max-height: 260px; }
 .slot-status { display: block; margin-top: 6px; }
 @media (max-width: 640px) { .slots { grid-template-columns: 1fr; } }
+.fv-title { font-size: 14px; font-weight: 700; margin: 18px 0 8px; }
+.fv-title .muted { font-weight: 400; font-size: 12px; margin-left: 4px; }
+.fv .k .muted { font-size: 11px; margin-left: 2px; }

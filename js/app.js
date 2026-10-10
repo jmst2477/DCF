@@ -24,7 +24,7 @@
   // 모든 해에 같은 가정을 쓰고 3년만 계산. 법인세 21%, 순운전자본 매출의 1%는 강의 기본값.
   const MAX_YEARS = 3; // 예측은 3년까지 (사용자 결정 2026-10-10)
   function blankBasic() {
-    return { rev0: 0, growth: 0.1, margin: 0.2, tax: 0.21, da: 0.05, capex: 0.05, nwc: 0.01, years: 3, src: {} };
+    return { rev0: 0, growth: 0.1, margin: 0.2, tax: 0.21, da: 0.05, capex: 0.05, nwc: 0.01, years: 3, pe: 20, src: {} };
   }
   const BASIC_FIELDS = [
     { key: 'rev0', label: '0년차 매출 (백만 $)', type: 'num' },
@@ -41,6 +41,7 @@
     { key: 'debt', label: '총차입금 (백만 $)', type: 'num', shared: true },
     { key: 'price', label: '현재 주가 ($)', type: 'num', shared: true },
     { key: 'years', label: '예측 연수', type: 'int', hint: '기본 3년 (추정치가 더 있어도 3년까지)' },
+    { key: 'pe', label: '적정 P/E (배, P/E 방식)', type: 'num' },
   ];
 
   // 지금 갖고 있는 자료(티커 조회·캡처·PDF)로 기본 가정을 채움. 직접 고친 칸('user')은 건드리지 않음.
@@ -79,9 +80,31 @@
       if (b.src.da !== 'user' && !(avgSrc('da') || {}).v && b.da > b.capex) set('da', b.capex, '캐펙스와 같게 (조정 EPS는 상각비를 이미 뺌)');
     }
     for (const [k, v] of [['tax', 0.21], ['nwc', 0.01]]) if (!b.src[k]) { b[k] = v; b.src[k] = '강의 기본값'; }
+    // 적정 P/E: EPS 추정치가 2개 이상이면 PEG 1.5 × EPS 연평균 성장률(%) (10~40배), 없으면 20배
+    const eg = epsGrowth(s);
+    if (eg != null) set('pe', Math.max(10, Math.min(40, 1.5 * eg * 100)), `PEG 1.5 × EPS 성장률 ${(eg * 100).toFixed(1)}%`);
+    else if (!b.src.pe) { b.pe = 20; b.src.pe = '시장 평균 수준 20배'; }
     if (!b.src.years || b.src.years === '강의 기본값') { b.years = MAX_YEARS; b.src.years = '기본 3년'; }
     return s;
   }
+  // ---------- P/E 방식: 적정가 = 예상 EPS × 적정 P/E ----------
+  // 지금 = 1년차 EPS, 내년 = 2년차, 내후년 = 3년차. 시킹알파 EPS 추정치가 없으면 계산값(매출 × 이익률 × (1 − 세율) ÷ 주식수).
+  function epsAt(s, t) {
+    const raw = s.estRaw && s.estRaw.eps, y = s.baseFY + t;
+    if (raw && raw[y] > 0) return { v: raw[y], est: true };
+    const b = s.basic;
+    if (!(b && b.rev0 > 0 && s.shares > 0)) return { v: NaN, est: false };
+    return { v: b.rev0 * Math.pow(1 + b.growth, t) * b.margin * (1 - b.tax) / s.shares, est: false };
+  }
+  function epsGrowth(s) {
+    const raw = s.estRaw && s.estRaw.eps;
+    if (!raw) return null;
+    const ys = [1, 2, 3].map(t => s.baseFY + t).filter(y => raw[y] > 0);
+    if (ys.length < 2) return null;
+    const a = ys[0], z = ys[ys.length - 1];
+    return Math.pow(raw[z] / raw[a], 1 / (z - a)) - 1;
+  }
+
   function basicInput() {
     const b = state.basic;
     return { rev0: b.rev0, growth: b.growth, margin: b.margin, tax: b.tax, da: b.da, capex: b.capex, nwc: b.nwc, years: b.years,
@@ -255,6 +278,19 @@
     renderSens();
   }
 
+  function peRow(chg, money, LABEL) {
+    const pe = state.basic.pe;
+    if (!(pe > 0)) return '';
+    const es = [1, 2, 3].map(t => epsAt(state, t));
+    if (!es.some(e => Number.isFinite(e.v))) return '';
+    const calc = es.some(e => !e.est);
+    return `<div class="fv-title">P/E 방식 <span class="muted">예상 EPS × ${(+pe).toFixed(1)}배${calc ? ' · † EPS 추정치가 없어 계산값 사용' : ''}</span></div>
+      <div class="fv-row">${es.map((e, k) => `
+        <div class="fv pe"><div class="k">${LABEL[k]}${e.est ? '' : ' †'} <span class="muted">EPS $${fmt(e.v, 2)}</span></div>
+          <div class="v">${money(e.v * pe)}</div>${chg(e.v * pe)}</div>`).join('')}
+      </div>`;
+  }
+
   function renderHero(ok, warn) {
     const name = state.companyName || state.ticker || '';
     if (!state.revenue[0] && !state.shares && !(state.basic && state.basic.rev0)) { $('#hero').innerHTML = '<p class="muted">티커를 넣고 계산을 누르세요.</p>'; return; }
@@ -274,10 +310,12 @@
       </div>
       <div class="hero-item main"><div class="k">지금 적정가</div><div class="v">${money(r.perShare)}</div>
         <div class="hero-sub">${price && ok ? `현재가보다 ${chg(r.perShare)}` : ''}</div></div>
+      <div class="fv-title">DCF <span class="muted">현금흐름 할인</span></div>
       <div class="fv-row">${rs.map(x => `
         <div class="fv${x.k ? '' : ' now'}"><div class="k">${LABEL[x.k]}${x.k && !x.full ? ' *' : ''}</div>
           <div class="v">${money(x.r.perShare)}</div>${chg(x.r.perShare)}</div>`).join('')}
       </div>
+      ${peRow(chg, money, LABEL)}
       <p class="hero-note">${r.horizon}년 예측 · 매출 성장률 ${pct(state.basic.growth)} · 영업이익률 ${pct(state.basic.margin)} · 할인율 ${pct(state.wacc)} · 영구성장률 ${pct(state.g)}<br>
         내년·내후년 적정가는 1년, 2년 뒤에 같은 방식(${r.horizon}년 예측)으로 계산한 값입니다. 현금·차입금·주식수는 지금과 같다고 봅니다.` +
         (partial ? '<br>* 그 해까지의 매출 추정치가 모자라 마지막 성장률을 이어 썼습니다. 시킹알파 매출 추정치를 5년치 넣으면 정확해집니다.' : '') + '</p>' +
