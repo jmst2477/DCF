@@ -186,3 +186,6 @@ a.bookmarklet { display: inline-block; padding: 4px 12px; border-radius: 8px; ba
 .fv-title { font-size: 14px; font-weight: 700; margin: 18px 0 8px; }
 .fv-title .muted { font-weight: 400; font-size: 12px; margin-left: 4px; }
 .fv .k .muted { font-size: 11px; margin-left: 2px; }
+/* 트레이딩뷰 차트 */
+.tv-chart { height: 460px; margin-top: 10px; border-radius: 12px; overflow: hidden; }
+@media (max-width: 560px) { .tv-chart { height: 360px; } }
