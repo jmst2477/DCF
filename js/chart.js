@@ -1,9 +1,8 @@
 // 신호 차트: 트레이딩뷰가 만든 무료 차트 라이브러리(Lightweight Charts)로 야후 일봉을 그리고,
-// 그 위에 사용자의 트레이딩뷰 지표·신호(RSI-2 매수·매도, 200일선, PWMA, SMC 구조, 스토캐스틱)를 입힌다.
+// 그 위에 고른 매매 신호(▲매수 ▼매도)와 켜 둔 차트 지표(js/strategy.js 의 CHART_INDICATORS)를 입힌다.
 (function (g) {
   'use strict';
   const UP = '#089981', DOWN = '#F23645'; // 트레이딩뷰 기본 캔들 색
-  const PWMA_UP = '#4caf50', PWMA_DOWN = '#f23645';
   const fix = v => (Number.isFinite(v) ? v : undefined);
 
   function theme() {
@@ -14,8 +13,8 @@
   }
   const alpha = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, '0');
 
-  // sets = [{ strat, sim }] : 차트에 표시할 매매 신호 (고른 것만)
-  function draw(el, d, sets, opts = {}) {
+  // sets = [{ strat, sim }] : 고른 매매 신호, inds = [{ ind, out }] : 켜 둔 지표와 그 plot() 결과
+  function draw(el, d, sets, inds, opts = {}) {
     const LC = g.LightweightCharts;
     if (!LC) { el.innerHTML = '<p class="muted small" style="padding:16px">차트 라이브러리를 불러오지 못했습니다.</p>'; return null; }
     el.innerHTML = '';
@@ -37,33 +36,49 @@
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     vol.setData(T.map((t, i) => ({ time: t, value: d.volume[i] || 0, color: alpha(d.close[i] >= d.open[i] ? UP : DOWN, th.vol) })));
 
-    const line = (data, o) => {
-      const s = chart.addSeries(LC.LineSeries, Object.assign({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }, o), o.pane || 0);
+    const line = (data, o, pane) => {
+      const s = chart.addSeries(LC.LineSeries, Object.assign({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }, o), pane || 0);
       s.setData(data);
       return s;
     };
-    // 200일선 (RSI-2 전략의 추세 필터)
-    const sma = g.TA.sma(d.close, 200);
-    line(T.map((t, i) => ({ time: t, value: fix(sma[i]) })).filter(p => p.value !== undefined), { color: '#9598a1', lineWidth: 1, title: '200일선' });
-    // PWMA: 오르면 초록, 내리면 빨강 (원본 스크립트와 같음)
-    const pw = g.IND.pwma(d.close);
-    line(T.map((t, i) => ({ time: t, value: fix(pw[i]), color: pw[i] > pw[i - 1] ? PWMA_UP : PWMA_DOWN })).filter(p => p.value !== undefined), { lineWidth: 2 });
+    const candleMarks = [];
+    let nextPane = 1;
 
-    // SMC 구조: 피벗에서 돌파 봉까지 선 + BOS/CHoCH 글자 (스윙 실선, 내부 점선)
-    const smc = g.SMC.structure(d);
-    const since = Math.max(0, n - (opts.smcBars || 260));
-    [['swing', 0], ['internal', 2]].forEach(([k, style]) => {
-      smc[k].events.filter(e => e.i >= since && e.from < e.i).forEach(e => {
-        const c = e.bull ? UP : DOWN;
-        const s = line([{ time: T[e.from], value: e.level }, { time: T[e.i], value: e.level }], { color: c, lineWidth: 1, lineStyle: style });
-        const mid = T[Math.round((e.from + e.i) / 2)];
-        LC.createSeriesMarkers(s, [{ time: mid, position: e.bull ? 'aboveBar' : 'belowBar', shape: 'circle', size: 0, color: c, text: e.tag }]);
+    // 지표
+    inds.forEach(({ ind, out }) => {
+      if (!out) return;
+      const subLines = (out.lines || []).filter(l => l.pane === 'sub');
+      const pane = subLines.length || (out.hlines || []).length ? nextPane++ : 0;
+      let first = null;
+      (out.lines || []).forEach(l => {
+        const vals = l.values || [];
+        const data = T.map((t, i) => {
+          const v = fix(vals[i]);
+          if (v === undefined) return null;
+          const p = { time: t, value: v };
+          if (l.colors && l.colors[i]) p.color = l.colors[i];
+          return p;
+        }).filter(Boolean);
+        const o = { color: l.color || ind.color || '#787B86', lineWidth: l.width || 1.5, lineStyle: l.dashed ? 2 : 0, title: l.pane === 'sub' ? '' : (l.title || '') };
+        if (l.pane === 'sub') o.lastValueVisible = true;
+        if (l.range) o.autoscaleInfoProvider = () => ({ priceRange: { minValue: l.range[0], maxValue: l.range[1] } });
+        const s = line(data, o, l.pane === 'sub' ? pane : 0);
+        if (l.pane === 'sub' && !first) first = s;
+      });
+      if (first) (out.hlines || []).forEach(h => first.createPriceLine({ price: h.price, color: h.color || '#787B86', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }));
+      (out.segments || []).forEach(sg => {
+        if (!(sg.from >= 0 && sg.to < n && sg.from < sg.to)) return;
+        const s = line([{ time: T[sg.from], value: sg.price }, { time: T[sg.to], value: sg.price }], { color: sg.color || ind.color, lineWidth: 1, lineStyle: sg.dashed ? 2 : 0 });
+        if (sg.text) LC.createSeriesMarkers(s, [{ time: T[Math.round((sg.from + sg.to) / 2)], position: sg.textPos === 'below' ? 'belowBar' : 'aboveBar', shape: 'circle', size: 0, color: sg.color || ind.color, text: sg.text }]);
+      });
+      (out.marks || []).forEach(m => {
+        if (!(m.i >= 0 && m.i < n)) return;
+        candleMarks.push({ i: m.i, time: T[m.i], position: m.position === 'above' ? 'aboveBar' : 'belowBar', shape: m.shape || 'circle', color: m.color || ind.color, text: m.text || '' });
       });
     });
 
     // 매매 신호 표시 (원본 스크립트 label과 같은 자리: 매수는 저가 아래 ▲, 매도는 고가 위 ▼). 신호마다 색이 다르다.
-    const marks = [];
-    sets.forEach(({ strat, sim }) => sim.marks.forEach(m => marks.push({
+    sets.forEach(({ strat, sim }) => sim.marks.forEach(m => candleMarks.push({
       i: m.i,
       time: T[m.i],
       position: m.kind === 'buy' ? 'belowBar' : 'aboveBar',
@@ -71,24 +86,20 @@
       color: strat.color,
       text: (m.kind === 'buy' ? '매수 ' : '매도 ') + d.close[m.i].toFixed(2),
     })));
-    marks.sort((a, b) => a.i - b.i);
-    LC.createSeriesMarkers(candles, marks.map(({ i, ...m }) => m));
+    candleMarks.sort((a, b) => a.i - b.i);
+    LC.createSeriesMarkers(candles, candleMarks.map(({ i, ...m }) => m));
 
-    // 아래 칸: 스토캐스틱
-    const st = g.IND.stoch(d, g.TA);
-    const range = () => ({ priceRange: { minValue: 0, maxValue: 100 } });
-    const k = line(T.map((t, i) => ({ time: t, value: fix(st.k[i]) })).filter(p => p.value !== undefined), { color: '#2962FF', lineWidth: 1.5, pane: 1, lastValueVisible: true, autoscaleInfoProvider: range });
-    line(T.map((t, i) => ({ time: t, value: fix(st.d[i]) })).filter(p => p.value !== undefined), { color: '#FF6D00', lineWidth: 1.5, pane: 1, lastValueVisible: true, autoscaleInfoProvider: range });
-    [80, 50, 20].forEach(p => k.createPriceLine({ price: p, color: '#787B86', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }));
     const panes = chart.panes();
-    if (panes[1]) panes[1].setHeight(Math.round(el.clientHeight * 0.24));
-
+    const subH = Math.round(el.clientHeight * (panes.length > 2 ? 0.18 : 0.24));
+    panes.slice(1).forEach(p => p.setHeight(subH));
     chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 });
 
     // 왼쪽 위 범례
     const lg = document.createElement('div');
     lg.className = 'chart-legend';
-    lg.innerHTML = sets.map(({ strat }) => `<span><i style="background:${strat.color}"></i><b>${strat.name}</b> ▲매수 ▼매도</span>`).join('') + `<span><i style="background:${PWMA_UP}"></i>PWMA 14 2</span><span><i style="background:#9598a1"></i>200일선</span><span>SMC 구조 (실선 스윙, 점선 내부)</span><span>아래: 스토캐스틱 ${g.IND.stochK} ${g.IND.stochSmooth} ${g.IND.stochD}</span>`;
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    lg.innerHTML = sets.map(({ strat }) => `<span><i style="background:${strat.color}"></i><b>${esc(strat.name)}</b> ▲매수 ▼매도</span>`).join('') +
+      inds.map(({ ind }) => `<span><i style="background:${ind.color || '#787B86'}"></i>${esc(ind.name)}</span>`).join('');
     el.appendChild(lg);
     return chart;
   }

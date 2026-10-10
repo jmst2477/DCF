@@ -211,7 +211,7 @@ body.modal-open { overflow: hidden; }
 .sig-pill.hold { background: var(--accent-weak); color: var(--accent-dark); }
 .sig-tag.hold { color: var(--accent-dark); }
 .sig-tag.none { color: var(--muted); }
-.modal-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.modal-main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; z-index: 0; }
 .modal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .modal-head > div:first-child { flex: 1; min-width: 200px; }
 .modal-title { font-size: 20px; }
@@ -241,8 +241,42 @@ body.modal-open { overflow: hidden; }
 .sig-ind .ind-name { color: var(--sub); min-width: 170px; font-weight: 500; }
 .sig-ind .ind-val { font-variant-numeric: tabular-nums; }
 /* 신호 고르기 */
-.strat-pick { display: flex; flex-wrap: wrap; gap: 6px; }
-.modal-pick { padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.strat-pick, .ind-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.modal-pick { padding: 6px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 5px; }
+.pick-row { display: flex; align-items: center; gap: 10px; }
+.pick-label { flex: none; width: 28px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.ind-pick .chip { padding: 4px 10px; font-size: 12px; }
+.chip-rate { font-size: 11px; font-weight: 700; color: var(--sub); background: var(--soft); border-radius: 999px; padding: 1px 7px; margin-left: 2px; }
+.chip.on .chip-rate { color: var(--c); background: var(--card); }
+.chip.add { border-style: dashed; color: var(--accent); background: transparent; }
+.chip.add:hover { border-color: var(--accent); }
+/* 관심종목 승률 */
+.wl-left { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.wl-rate { font-size: 11px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+/* 전략별 성적 비교 */
+.cmp-title { margin: 16px 0 4px; font-size: 14px; }
+.cmp td:first-child, .cmp th:first-child { text-align: left; }
+.cmp tr.sel td { background: var(--accent-weak); }
+.cmp tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* 신호·지표 추가 */
+.modal-box { position: relative; }
+.add-panel { position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 24px 12px; overflow-y: auto; }
+.add-panel[hidden] { display: none; }
+.add-box { width: 100%; max-width: 640px; background: var(--card); border-radius: 16px; padding: 18px 20px; box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+.add-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 17px; }
+.add-kind { display: flex; flex-wrap: wrap; gap: 8px; }
+.add-kind label { flex: 1; min-width: 200px; flex-direction: row; align-items: center; gap: 8px; border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--text); cursor: pointer; }
+.add-kind label:has(input:checked) { border-color: var(--accent); background: var(--accent-weak); }
+#add-code { width: 100%; box-sizing: border-box; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--input-bg); color: var(--input-text); border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; }
+.add-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.add-actions input { flex: 1; min-width: 180px; }
+.add-result { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-size: 14px; }
+.add-result p { margin: 4px 0; }
+.add-notes { margin: 6px 0 0; padding-left: 18px; }
+.add-sub { margin: 14px 0 6px; font-size: 14px; }
+.add-list { list-style: none; margin: 0; padding: 0; }
+.add-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.add-list li button { margin-left: auto; }
 .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card); color: var(--sub); border: 1.5px solid var(--line); padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
 .chip:hover { background: var(--card); border-color: var(--c); }
 .chip i, .strat-name i, .strat-head i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
@@ -259,3 +293,14 @@ body.modal-open { overflow: hidden; }
 .modal-info[open] { max-height: 42vh; overflow-y: auto; }
 .modal-info > summary { font-weight: 600; padding: 4px 0; }
 .modal-info .hint { margin: 8px 0 4px; }
+/* 휴대폰: 신호·지표 버튼은 옆으로 밀어서 보기, 차트 높이 확보 */
+@media (max-width: 760px) {
+  .modal-main { overflow-y: auto; }
+  .modal-chart { flex: none; height: 56vh; min-height: 300px; }
+  .modal-pick { padding: 6px 10px; }
+  .strat-pick, .ind-pick { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .strat-pick .chip, .ind-pick .chip { flex: none; }
+  .pick-label { width: 24px; }
+  .add-panel { padding: 0; }
+  .add-box { border-radius: 0; min-height: 100%; }
+}
