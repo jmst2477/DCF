@@ -270,8 +270,29 @@
   }
 
   // ---------- 4. 결과 ----------
+  // ---------- 트레이딩뷰 차트 (무료 위젯) ----------
+  let chartTicker = null;
+  function renderChart() {
+    const t = (state.ticker || '').trim().toUpperCase();
+    $('#chart-card').hidden = !t;
+    if (!t || t === chartTicker) return;
+    chartTicker = t;
+    const box = $('#tv-chart');
+    box.innerHTML = '<div class="tradingview-widget-container" style="height:100%;width:100%"><div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div></div>';
+    const sc = document.createElement('script');
+    sc.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+    sc.async = true;
+    sc.textContent = JSON.stringify({
+      autosize: true, symbol: t, interval: 'D', timezone: 'Asia/Seoul', locale: 'kr',
+      theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+      style: '1', allow_symbol_change: false, hide_side_toolbar: false, withdateranges: true, support_host: 'https://www.tradingview.com',
+    });
+    box.firstChild.appendChild(sc);
+  }
+
   function recalc() {
     save();
+    renderChart();
     renderBasic();
     const bw = basicWarnings();
     renderHero(!bw.length, bw);
