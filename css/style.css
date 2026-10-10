@@ -189,3 +189,15 @@ a.bookmarklet { display: inline-block; padding: 4px 12px; border-radius: 8px; ba
 /* 트레이딩뷰 차트 */
 .tv-chart { height: 460px; margin-top: 10px; border-radius: 12px; overflow: hidden; }
 @media (max-width: 560px) { .tv-chart { height: 360px; } }
+/* 매수 신호 */
+.signal-box { background: var(--soft); border-radius: 16px; padding: 16px 18px; margin: 12px 0 0; }
+.sig-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sig-badge { font-size: 17px; font-weight: 700; padding: 6px 14px; border-radius: 999px; background: var(--card); color: var(--sub); }
+.sig-badge.buy { background: var(--up); color: #fff; }
+.sig-badge.sell { background: var(--down); color: #fff; }
+.sig-last { margin: 10px 0 4px; font-variant-numeric: tabular-nums; }
+.sig-tag { font-weight: 700; }
+.sig-tag.buy { color: var(--up); }
+.sig-tag.sell { color: var(--down); }
+.signal-box details { margin: 6px 0; }
+.signal-box .hint { margin: 8px 0 0; }

@@ -22,7 +22,7 @@ async function getJson(url, headers) {
   }
 }
 
-async function yahooSession() {
+export async function yahooSession() {
   const r1 = await fetch("https://fc.yahoo.com", { headers: { "User-Agent": UA } });
   const setCookie =
     (r1.headers.getSetCookie ? r1.headers.getSetCookie().join("; ") : r1.headers.get("set-cookie")) || "";
