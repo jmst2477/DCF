@@ -186,9 +186,6 @@ ol.guide li { margin: 4px 0; }
 /* 신호 차트 */
 .title-row { display: flex; align-items: center; gap: 12px; }
 .chart-btn { padding: 7px 14px; font-size: 14px; }
-.big-btn { margin-left: auto; }
-.sig-chart { position: relative; height: 520px; margin-top: 12px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
-@media (max-width: 560px) { .sig-chart { height: 420px; } }
 .chart-legend { position: absolute; top: 6px; left: 8px; z-index: 3; display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11px; color: var(--sub); pointer-events: none; max-width: 75%; }
 .chart-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 /* 큰 화면 */
@@ -229,7 +226,6 @@ body.modal-open { overflow: hidden; }
   .wl { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 26vh; padding: 10px; }
 }
 /* 매수 신호 */
-.signal-box { background: var(--soft); border-radius: 16px; padding: 16px 18px; margin: 12px 0 0; }
 .sig-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .sig-badge { font-size: 17px; font-weight: 700; padding: 6px 14px; border-radius: 999px; background: var(--card); color: var(--sub); }
 .sig-badge.buy { background: var(--up); color: #fff; }
@@ -238,11 +234,28 @@ body.modal-open { overflow: hidden; }
 .sig-tag { font-weight: 700; }
 .sig-tag.buy { color: var(--up); }
 .sig-tag.sell { color: var(--down); }
-.signal-box details { margin: 6px 0; }
-.signal-box .hint { margin: 8px 0 0; }
 .sig-badge.hold { background: var(--accent-weak); color: var(--accent-dark); }
 .sig-stats { margin: 4px 0; color: var(--sub); }
 .sig-ind { list-style: none; padding: 0; margin: 10px 0 4px; border-top: 1px solid var(--line); }
 .sig-ind li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .sig-ind .ind-name { color: var(--sub); min-width: 170px; font-weight: 500; }
 .sig-ind .ind-val { font-variant-numeric: tabular-nums; }
+/* 신호 고르기 */
+.strat-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.modal-pick { padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card); color: var(--sub); border: 1.5px solid var(--line); padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.chip:hover { background: var(--card); border-color: var(--c); }
+.chip i, .strat-name i, .strat-head i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.chip.on { border-color: var(--c); color: var(--text); background: color-mix(in srgb, var(--c) 12%, var(--card)); }
+.strat-row { margin-top: 12px; padding-left: 12px; border-left: 3px solid var(--c); }
+.strat-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.strat-head b { font-size: 15px; }
+.strat-desc { margin: 4px 0 0; }
+.strat-row .sig-last { margin: 6px 0 2px; }
+.strat-name { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 13px; }
+.wl-only { flex-direction: row; align-items: center; gap: 6px; margin: 0 2px 6px; color: var(--sub); }
+.wl-list.only li:not([data-sig="buy"]):not([data-sig="sell"]) { display: none; }
+.modal-info { border-top: 1px solid var(--line); padding: 8px 16px; flex: none; }
+.modal-info[open] { max-height: 42vh; overflow-y: auto; }
+.modal-info > summary { font-weight: 600; padding: 4px 0; }
+.modal-info .hint { margin: 8px 0 4px; }

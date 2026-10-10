@@ -272,14 +272,6 @@
 
   // ---------- 4. 결과 ----------
   // ---------- 트레이딩뷰 차트 (무료 위젯) ----------
-  let chartTicker = null;
-  function renderChart() {
-    const t = (state.ticker || '').trim().toUpperCase();
-    $('#chart-card').hidden = !t;
-    if (!t || t === chartTicker) return;
-    chartTicker = t;
-    renderSignals(t);
-  }
   // 트레이딩뷰 무료 위젯 (큰 화면의 "트레이딩뷰" 탭)
   function loadTv(box, t) {
     box.innerHTML = '<div class="tradingview-widget-container" style="height:100%;width:100%"><div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div></div>';
@@ -294,9 +286,10 @@
     box.firstChild.appendChild(sc);
   }
 
-  // ---------- 매수 신호 (js/strategy.js 조건을 야후 일봉으로 계산) ----------
+  // ---------- 매매 신호 (js/strategy.js 의 STRATEGIES 를 야후 일봉으로 계산) ----------
   const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
+  const STRATS = window.STRATEGIES || [];
   // 트레이딩뷰 strategy와 같은 방식: 신호 봉 종가에서 판단 → 다음 봉 시가에 체결, 보유 중엔 매수 표시 안 함
   function simulate(d, strat) {
     const out = strat.run(d, window.TA);
@@ -312,7 +305,7 @@
     }
     return { out, marks, trades, pos, entry };
   }
-  // 종목별 일봉 + 신호 계산 (한 번 받은 종목은 다시 받지 않음)
+  // 종목별 일봉 + 모든 신호 계산 (한 번 받은 종목은 다시 받지 않음). sims[id] = 신호별 결과 (계산 오류면 { error })
   const sigCache = {};
   function getSig(t) {
     if (!sigCache[t]) {
@@ -320,64 +313,81 @@
         .then(async res => {
           const d = await res.json().catch(() => ({}));
           if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
-          return { d, sim: simulate(d, window.STRATEGY) };
+          const sims = {};
+          STRATS.forEach(s => { try { sims[s.id] = simulate(d, s); } catch (e) { sims[s.id] = { error: e.message || String(e) }; } });
+          return { d, sims };
         });
       sigCache[t].catch(() => delete sigCache[t]); // 실패하면 다음에 다시 시도
     }
     return sigCache[t];
   }
   // 마지막 봉 기준 상태: 오늘 매수 / 오늘 청산 / 보유 구간 / 신호 없음
-  function sigState({ d, sim }) {
+  function sigState(d, sim) {
     const L = d.close.length - 1;
+    if (!sim || sim.error) return { cls: 'none', text: '계산 오류', short: '' };
     if (sim.out.buy[L]) return { cls: 'buy', text: '오늘 매수 신호', short: '매수' };
     if (sim.out.exit[L] && sim.pos) return { cls: 'sell', text: '오늘 청산 신호', short: '청산' };
     if (sim.pos) return { cls: 'hold', text: '보유 구간 · 청산 신호 기다리는 중', short: '보유' };
     return { cls: 'none', text: '오늘은 신호 없음', short: '' };
   }
-  let inlineChart = null;
 
-  async function renderSignals(t) {
-    const strat = window.STRATEGY;
-    $('#sig-name').textContent = strat ? strat.name + ' · ' + strat.desc : '';
-    $('#sig-badge').className = 'sig-badge';
-    $('#sig-badge').textContent = '신호 계산 중…';
-    $('#sig-last').textContent = '';
-    $('#sig-stats').textContent = '';
+  // 볼 신호 고르기: 한 번에 하나만 (이 브라우저에 저장, 처음엔 첫 번째 신호)
+  const SEL_KEY = 'dcf-strategy';
+  let stratSel = (() => { try { return localStorage.getItem(SEL_KEY); } catch (e) { return null; } })();
+  if (!STRATS.some(s => s.id === stratSel)) stratSel = STRATS[0] && STRATS[0].id;
+  const activeStrats = () => STRATS.filter(s => s.id === stratSel);
+  function renderPickers() {
+    $$('.strat-pick').forEach(box => {
+      box.innerHTML = STRATS.map(s => `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc)}" style="--c:${s.color}"><i></i>${esc(s.name)}</button>`).join('');
+    });
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.strat-pick .chip');
+    if (!b || b.dataset.sid === stratSel) return;
+    stratSel = b.dataset.sid;
+    try { localStorage.setItem(SEL_KEY, stratSel); } catch (x) { /* 저장 불가 */ }
+    renderPickers();
+    if (!$('#chart-modal').hidden) { renderWatch(); if (modalTicker) showModalTicker(modalTicker); }
+  });
+  const chartSets = (d, sims) => activeStrats().filter(s => sims[s.id] && !sims[s.id].error).map(s => ({ strat: s, sim: sims[s.id] }));
+
+  // 큰 화면 아래 "신호 자세히": 고른 신호의 상태·마지막 신호·성적, 보조 지표, 최근 신호
+  function renderSigInfo(d, sims) {
     $('#sig-ind').innerHTML = '';
     $('#sig-more').hidden = true;
-    let d, sim;
-    try {
-      ({ d, sim } = await getSig(t));
-    } catch (e) {
-      if (chartTicker === t) { $('#sig-badge').textContent = '신호 계산 불가'; $('#sig-last').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e); }
-      return;
-    }
-    if (chartTicker !== t) return; // 그 사이 다른 종목으로 바뀜
-    if (inlineChart) inlineChart.remove();
-    inlineChart = window.SigChart.draw($('#sig-chart'), d, sim, { bars: 90 });
     const n = d.close.length, L = n - 1, last = d.close[L];
-    const st = sigState({ d, sim });
-    $('#sig-badge').className = 'sig-badge ' + st.cls;
-    $('#sig-badge').textContent = st.text;
-
-    const latest = sim.marks[sim.marks.length - 1];
-    if (latest) {
-      const days = L - latest.i;
-      $('#sig-last').innerHTML = `마지막 신호: <b>${latest.kind === 'buy' ? '매수' : '청산'}</b> · ${d.time[latest.i]}${days ? ` (${days}거래일 전)` : ''} · ${fmtP(d.close[latest.i])}` +
-        (days ? ` → 지금 ${fmtP(last)} ${fmtR(last / d.close[latest.i] - 1)}` : '');
-      const rows = sim.marks.slice(-10).reverse().map(s =>
-        `<tr><td>${d.time[s.i]}</td><td><span class="sig-tag ${s.kind}">${s.kind === 'buy' ? '매수' : '청산'}</span></td><td>${fmtP(d.close[s.i])}</td><td>${s.i === L ? '-' : fmtR(last / d.close[s.i] - 1)}</td></tr>`).join('');
-      $('#sig-table').innerHTML = `<thead><tr><th>날짜</th><th>신호</th><th>그날 종가</th><th>지금까지</th></tr></thead><tbody>${rows}</tbody>`;
+    const act = activeStrats();
+    $('#sig-strats').innerHTML = act.map(s => {
+      const sim = sims[s.id];
+      if (!sim || sim.error) return `<div class="strat-row" style="--c:${s.color}"><div class="strat-head"><i></i><b>${esc(s.name)}</b><span class="sig-badge">계산 오류</span></div><p class="small muted">${esc(sim ? sim.error : '')}</p></div>`;
+      const st = sigState(d, sim), latest = sim.marks[sim.marks.length - 1];
+      let lastTxt = `${d.time[0]} 이후로 신호가 한 번도 없었습니다.`;
+      if (latest) {
+        const days = L - latest.i;
+        lastTxt = `마지막 신호: <b>${latest.kind === 'buy' ? '매수' : '청산'}</b> · ${d.time[latest.i]}${days ? ` (${days}거래일 전)` : ''} · ${fmtP(d.close[latest.i])}` + (days ? ` → 지금 ${fmtP(last)} ${fmtR(last / d.close[latest.i] - 1)}` : '');
+      }
+      const tr = sim.trades;
+      let stats = '';
+      if (tr.length) {
+        const wins = tr.filter(x => x.ret > 0).length;
+        const total = tr.reduce((a, x) => a * (1 + x.ret), 1) - 1;
+        const avg = tr.reduce((a, x) => a + x.ret, 0) / tr.length;
+        stats = `${d.time[0].slice(0, 4)}년 이후 이 조건대로 사고팔았다면: 거래 ${tr.length}번 · 이긴 거래 ${wins}번 (${Math.round((wins / tr.length) * 100)}%) · 거래당 평균 ${fmtR(avg)} · 누적 ${fmtR(total)} <span class="muted">(다음 날 시가 체결, 수수료 ${(s.commission * 100).toFixed(2)}%)</span>`;
+      }
+      return `<div class="strat-row" style="--c:${s.color}">
+        <div class="strat-head"><i></i><b>${esc(s.name)}</b><span class="sig-badge ${st.cls}">${st.text}</span></div>
+        <p class="strat-desc muted small">${esc(s.desc)}</p>
+        <p class="sig-last">${lastTxt}</p>${stats ? `<p class="sig-stats small">${stats}</p>` : ''}</div>`;
+    }).join('');
+    // 최근 신호 (고른 신호 전부, 날짜 순)
+    const all = [];
+    act.forEach(s => { const sim = sims[s.id]; if (sim && sim.marks) sim.marks.forEach(m => all.push({ ...m, s })); });
+    all.sort((a, b) => b.i - a.i);
+    if (all.length) {
+      const rows = all.slice(0, 15).map(m =>
+        `<tr><td>${d.time[m.i]}</td><td><span class="strat-name" style="--c:${m.s.color}"><i></i>${esc(m.s.short)}</span></td><td><span class="sig-tag ${m.kind}">${m.kind === 'buy' ? '매수' : '청산'}</span></td><td>${fmtP(d.close[m.i])}</td><td>${m.i === L ? '-' : fmtR(last / d.close[m.i] - 1)}</td></tr>`).join('');
+      $('#sig-table').innerHTML = `<thead><tr><th>날짜</th><th>신호</th><th></th><th>그날 종가</th><th>지금까지</th></tr></thead><tbody>${rows}</tbody>`;
       $('#sig-more').hidden = false;
-    } else {
-      $('#sig-last').textContent = `${d.time[0]} 이후로 신호가 한 번도 없었습니다.`;
-    }
-    const tr = sim.trades;
-    if (tr.length) {
-      const wins = tr.filter(x => x.ret > 0).length;
-      const total = tr.reduce((a, x) => a * (1 + x.ret), 1) - 1;
-      const avg = tr.reduce((a, x) => a + x.ret, 0) / tr.length;
-      $('#sig-stats').innerHTML = `${d.time[0].slice(0, 4)}년 이후 이 조건대로 사고팔았다면: 거래 ${tr.length}번 · 이긴 거래 ${wins}번 (${Math.round((wins / tr.length) * 100)}%) · 거래당 평균 ${fmtR(avg)} · 누적 ${fmtR(total)} <span class="muted">(다음 날 시가 체결, 수수료 ${(strat.commission * 100).toFixed(2)}%)</span>`;
     }
     $('#sig-ind').innerHTML = (window.INDICATORS || []).map(ind => {
       let r;
@@ -388,7 +398,6 @@
 
   function recalc() {
     save();
-    renderChart();
     renderBasic();
     const bw = basicWarnings();
     renderHero(!bw.length, bw);
@@ -1042,6 +1051,7 @@
     t = (t || state.ticker || watch[0] || '').trim().toUpperCase();
     $('#chart-modal').hidden = false;
     document.body.classList.add('modal-open');
+    renderPickers();
     renderWatch();
     if (t) showModalTicker(t);
     else $('#modal-sig').innerHTML = '<p class="muted" style="padding:24px">왼쪽에 관심종목을 추가하거나, 위 검색창에서 종목을 계산하세요.</p>';
@@ -1061,13 +1071,17 @@
     else tvTicker = null;
     if (modalChart) { modalChart.remove(); modalChart = null; }
     $('#modal-sig').innerHTML = '';
+    $('#sig-strats').innerHTML = '';
+    $('#sig-ind').innerHTML = '';
+    $('#sig-more').hidden = true;
     try {
       const r = await getSig(t);
       if (modalTicker !== t || $('#chart-modal').hidden) return;
-      const st = sigState(r), L = r.d.close.length - 1;
+      const s0 = activeStrats()[0], st = sigState(r.d, s0 && r.sims[s0.id]), L = r.d.close.length - 1;
       const chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
-      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)} · <span class="sig-tag ${st.cls}">${st.text}</span> <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
-      modalChart = window.SigChart.draw($('#modal-sig'), r.d, r.sim, { bars: 160 });
+      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span> <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
+      modalChart = window.SigChart.draw($('#modal-sig'), r.d, chartSets(r.d, r.sims), { bars: 160 });
+      renderSigInfo(r.d, r.sims);
     } catch (e) {
       if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
     }
@@ -1091,8 +1105,12 @@
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
       if (!el) return;
-      const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0, st = sigState(r);
+      const s0 = activeStrats()[0], st = sigState(r.d, s0 && r.sims[s0.id]);
+      const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
       el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}`;
+      const li = el.closest('li');
+      if (li) li.dataset.sig = st.cls;
+      updateOnly();
     }, () => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
       if (el) el.innerHTML = '<span class="muted">조회 실패</span>';
@@ -1106,8 +1124,7 @@
   }
 
   $('#btn-chart').addEventListener('click', () => openModal());
-  $('#btn-chart-big').addEventListener('click', () => openModal(chartTicker));
-  $('#modal-close').addEventListener('click', closeModal);
+    $('#modal-close').addEventListener('click', closeModal);
   $('#chart-modal').addEventListener('click', e => { if (e.target.id === 'chart-modal') closeModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#chart-modal').hidden) closeModal(); });
   $$('#chart-modal .tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
@@ -1118,6 +1135,13 @@
     $('#wl-input').value = '';
     showModalTicker(t);
   });
+  // "오늘 매수·청산 신호 종목만": 해당 종목이 없으면 안내 문구
+  function updateOnly() {
+    const on = $('#wl-only').checked;
+    $('#wl-list').classList.toggle('only', on);
+    $('#wl-none').hidden = !on || !!$('#wl-list li[data-sig="buy"], #wl-list li[data-sig="sell"]');
+  }
+  $('#wl-only').addEventListener('change', updateOnly);
   $('#wl-list').addEventListener('click', e => {
     const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), pick = e.target.closest('.wl-pick');
     if (del) { watch = watch.filter(x => x !== del.dataset.del); saveWl(watch); renderWatch(); return; }

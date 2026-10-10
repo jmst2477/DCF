@@ -14,7 +14,8 @@
   }
   const alpha = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, '0');
 
-  function draw(el, d, sim, opts = {}) {
+  // sets = [{ strat, sim }] : 차트에 표시할 매매 신호 (고른 것만)
+  function draw(el, d, sets, opts = {}) {
     const LC = g.LightweightCharts;
     if (!LC) { el.innerHTML = '<p class="muted small" style="padding:16px">차트 라이브러리를 불러오지 못했습니다.</p>'; return null; }
     el.innerHTML = '';
@@ -60,15 +61,18 @@
       });
     });
 
-    // RSI-2 매수·매도 표시 (원본 스크립트 label과 같은 자리: 매수는 저가 아래, 매도는 고가 위)
-    const marks = sim.marks.map(m => ({
+    // 매매 신호 표시 (원본 스크립트 label과 같은 자리: 매수는 저가 아래 ▲, 매도는 고가 위 ▼). 신호마다 색이 다르다.
+    const marks = [];
+    sets.forEach(({ strat, sim }) => sim.marks.forEach(m => marks.push({
+      i: m.i,
       time: T[m.i],
       position: m.kind === 'buy' ? 'belowBar' : 'aboveBar',
       shape: m.kind === 'buy' ? 'arrowUp' : 'arrowDown',
-      color: m.kind === 'buy' ? UP : DOWN,
+      color: strat.color,
       text: (m.kind === 'buy' ? '매수 ' : '매도 ') + d.close[m.i].toFixed(2),
-    }));
-    LC.createSeriesMarkers(candles, marks);
+    })));
+    marks.sort((a, b) => a.i - b.i);
+    LC.createSeriesMarkers(candles, marks.map(({ i, ...m }) => m));
 
     // 아래 칸: 스토캐스틱
     const st = g.IND.stoch(d, g.TA);
@@ -84,7 +88,7 @@
     // 왼쪽 위 범례
     const lg = document.createElement('div');
     lg.className = 'chart-legend';
-    lg.innerHTML = `<span><i style="background:${UP}"></i>RSI-2 매수 · <i style="background:${DOWN}"></i>매도</span><span><i style="background:${PWMA_UP}"></i>PWMA 14 2</span><span><i style="background:#9598a1"></i>200일선</span><span>SMC 구조 (실선 스윙, 점선 내부)</span><span>아래: 스토캐스틱 ${g.IND.stochK} ${g.IND.stochSmooth} ${g.IND.stochD}</span>`;
+    lg.innerHTML = sets.map(({ strat }) => `<span><i style="background:${strat.color}"></i><b>${strat.name}</b> ▲매수 ▼매도</span>`).join('') + `<span><i style="background:${PWMA_UP}"></i>PWMA 14 2</span><span><i style="background:#9598a1"></i>200일선</span><span>SMC 구조 (실선 스윙, 점선 내부)</span><span>아래: 스토캐스틱 ${g.IND.stochK} ${g.IND.stochSmooth} ${g.IND.stochD}</span>`;
     el.appendChild(lg);
     return chart;
   }
