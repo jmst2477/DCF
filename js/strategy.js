@@ -146,7 +146,6 @@ window.IND = {
 //   segments: [{ from, to, price, color, dashed, text, textPos: 'above'|'below' }]  봉 번호 from~to 가로 선분
 //   marks:    [{ i, text, color, position: 'above'|'below', shape: 'arrowUp'|'arrowDown'|'circle'|'square' }]
 //   status:   { text, tone: 'up'|'down'|'' }        마지막 봉 상태 한 줄 (신호 자세히에 표시)
-const UPC = '#089981', DNC = '#F23645';
 window.CHART_INDICATORS = [
   {
     id: 'sma200',
@@ -171,27 +170,6 @@ window.CHART_INDICATORS = [
       return {
         lines: [{ title: 'PWMA', values: pw, colors: pw.map((v, i) => (v > pw[i - 1] ? '#4caf50' : '#f23645')), width: 2 }],
         status: { text: `${up ? '상승 중' : '하락 중'} (${run}일째) · ${pw[n].toFixed(2)}`, tone: up ? 'up' : 'down' },
-      };
-    },
-  },
-  {
-    id: 'smc',
-    name: '스마트머니 구조 (LuxAlgo SMC)',
-    color: '#d81b60',
-    plot(d) {
-      const s = window.SMC.structure(d), n = d.close.length, since = Math.max(0, n - 260);
-      const segments = [];
-      [['swing', false], ['internal', true]].forEach(([k, dashed]) => s[k].events.filter(e => e.i >= since && e.from < e.i).forEach(e => segments.push({
-        from: e.from, to: e.i, price: e.level, color: e.bull ? UPC : DNC, dashed, text: e.tag, textPos: e.bull ? 'above' : 'below',
-      })));
-      const trend = b => (b > 0 ? '상승' : b < 0 ? '하락' : '판단 전');
-      const ev = e => (e ? `${e.bull ? 'Bullish' : 'Bearish'} ${e.tag} ${e.time}` : '없음');
-      return {
-        segments,
-        status: {
-          text: `스윙 추세 ${trend(s.swing.bias)} (최근 ${ev(s.swing.last)}) · 내부 추세 ${trend(s.internal.bias)} (최근 ${ev(s.internal.last)})`,
-          tone: s.swing.bias > 0 ? 'up' : s.swing.bias < 0 ? 'down' : '',
-        },
       };
     },
   },
