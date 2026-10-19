@@ -62,9 +62,17 @@
         const o = { color: l.color || ind.color || '#787B86', lineWidth: l.width || 1.5, lineStyle: l.dashed ? 2 : 0, title: l.pane === 'sub' ? '' : (l.title || '') };
         if (l.pane === 'sub') o.lastValueVisible = true;
         if (l.range) o.autoscaleInfoProvider = () => ({ priceRange: { minValue: l.range[0], maxValue: l.range[1] } });
-        const s = line(data, o, l.pane === 'sub' ? pane : 0);
+        let s;
+        if (l.hist) { // 막대(히스토그램): 0을 기준으로 위아래
+          s = chart.addSeries(LC.HistogramSeries, { color: o.color, lastValueVisible: false, priceLineVisible: false, base: 0 }, l.pane === 'sub' ? pane : 0);
+          s.setData(data);
+        } else s = line(data, o, l.pane === 'sub' ? pane : 0);
         if (l.pane === 'sub' && !first) first = s;
       });
+      // 아래 칸 안의 점 (예: VuManChu 동그라미)
+      if (first && (out.dots || []).length) {
+        LC.createSeriesMarkers(first, out.dots.filter(o => o.i >= 0 && o.i < n && fix(o.price) !== undefined).map(o => ({ time: T[o.i], position: 'atPriceMiddle', price: o.price, shape: 'circle', size: o.size || 1, color: o.color })));
+      }
       if (first) (out.hlines || []).forEach(h => first.createPriceLine({ price: h.price, color: h.color || '#787B86', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }));
       (out.segments || []).forEach(sg => {
         if (!(sg.from >= 0 && sg.to < n && sg.from < sg.to)) return;
@@ -89,9 +97,12 @@
     candleMarks.sort((a, b) => a.i - b.i);
     LC.createSeriesMarkers(candles, candleMarks.map(({ i, ...m }) => m));
 
-    const panes = chart.panes();
-    const subH = Math.round(el.clientHeight * (panes.length > 2 ? 0.18 : 0.24));
-    panes.slice(1).forEach(p => p.setHeight(subH));
+    // 칸 비율: 아래 칸(지표)들은 같은 높이, 가격 칸이 나머지
+    const panes = chart.panes(), sub = panes.length > 2 ? 0.18 : 0.24;
+    if (panes.length > 1) {
+      panes[0].setStretchFactor(1 - sub * (panes.length - 1));
+      panes.slice(1).forEach(p => p.setStretchFactor(sub));
+    }
     chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 });
 
     // 왼쪽 위 범례
