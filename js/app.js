@@ -366,7 +366,7 @@
       box.innerHTML = STRATS.map(s => {
         const st = pickRates[s.id];
         return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
-      }).join('') + '<button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button>';
+      }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button>';
     });
     $$('.ind-pick').forEach(box => {
       box.innerHTML = INDS.map(i => `<button type="button" class="chip ${indOff.includes(i.id) ? '' : 'on'}" data-iid="${esc(i.id)}" style="--c:${i.color || '#787B86'}"><i></i>${esc(i.name)}</button>`).join('') +
@@ -376,6 +376,12 @@
   document.addEventListener('click', e => {
     const b = e.target.closest('.strat-pick .chip[data-sid]'), ib = e.target.closest('.ind-pick .chip[data-iid]'), add = e.target.closest('.chip.add');
     if (add) { openAdd(add.dataset.addKind); return; }
+    if (e.target.closest('.chip[data-about]')) {
+      const info = $('#modal-info');
+      info.open = true;
+      setTimeout(() => { const a = $('#sig-about'); (a || info).scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+      return;
+    }
     if (b) {
       if (b.dataset.sid === stratSel) return;
       stratSel = b.dataset.sid;
@@ -389,6 +395,13 @@
     if (!$('#chart-modal').hidden) { if (b) renderWatch(); if (modalTicker) showModalTicker(modalTicker); }
   });
 
+  // 신호 설명 (js/strategy.js 의 about: [제목, 내용] 목록). 직접 추가한 신호는 읽어 낸 조건을 보여 줌
+  function aboutHtml(s) {
+    const rows = s.about || (s.desc ? [['조건', s.desc]] : []);
+    if (!rows.length) return '';
+    return `<div id="sig-about" class="sig-about" style="--c:${s.color}"><h4>이 신호는? <span class="muted small">${esc(s.name)}</span></h4><dl>` +
+      rows.map(([t, p]) => `<dt>${esc(t)}</dt><dd>${esc(p)}</dd>`).join('') + '</dl></div>';
+  }
   // 차트 아래 "신호 자세히": 고른 신호, 모든 전략 승률 비교, 켜 둔 지표 상태, 최근 신호
   function renderSigInfo(r) {
     const d = r.d, n = d.close.length, L = n - 1, last = d.close[L];
@@ -410,6 +423,7 @@
           <p class="strat-desc muted small">${esc(s.desc || '')}</p>
           <p class="sig-last">${lastTxt}</p>${stats ? `<p class="sig-stats small">${stats}</p>` : ''}</div>`;
       }
+      html += aboutHtml(s);
     }
     // 전략별 승률 비교 (이 종목)
     const rows = STRATS.map(x => {
