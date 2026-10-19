@@ -249,6 +249,7 @@ body.modal-open { overflow: hidden; }
 .chip-rate { font-size: 11px; font-weight: 700; color: var(--sub); background: var(--soft); border-radius: 999px; padding: 1px 7px; margin-left: 2px; }
 .chip.on .chip-rate { color: var(--c); background: var(--card); }
 .chip.info { color: var(--sub); background: var(--soft); border-color: transparent; }
+.chip.info.on { --c: var(--accent); color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .sig-about { margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--soft); }
 .sig-about h4 { margin: 0 0 6px; font-size: 14px; }
 .sig-about dl { margin: 0; display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 14px; line-height: 1.55; }

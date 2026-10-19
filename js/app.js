@@ -372,14 +372,19 @@
       box.innerHTML = INDS.map(i => `<button type="button" class="chip ${indOff.includes(i.id) ? '' : 'on'}" data-iid="${esc(i.id)}" style="--c:${i.color || '#787B86'}"><i></i>${esc(i.name)}</button>`).join('') +
         '<button type="button" class="chip add" data-add-kind="indicator">＋ 지표 추가</button>';
     });
+    syncAbout();
   }
+  // "ⓘ 신호 설명" 버튼은 아래 설명 칸이 열려 있을 때 눌린 모양으로 (칸 제목을 눌러 닫아도 같이 바뀜)
+  const syncAbout = () => $$('.chip[data-about]').forEach(c => c.classList.toggle('on', !!$('#modal-info')?.open));
+  $('#modal-info')?.addEventListener('toggle', syncAbout);
   document.addEventListener('click', e => {
     const b = e.target.closest('.strat-pick .chip[data-sid]'), ib = e.target.closest('.ind-pick .chip[data-iid]'), add = e.target.closest('.chip.add');
     if (add) { openAdd(add.dataset.addKind); return; }
     if (e.target.closest('.chip[data-about]')) {
+      // 한 번 누르면 열고, 다시 누르면 닫아 차트를 크게 돌려놓는다
       const info = $('#modal-info');
-      info.open = true;
-      setTimeout(() => { const a = $('#sig-about'); (a || info).scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+      info.open = !info.open;
+      if (info.open) setTimeout(() => { const a = $('#sig-about'); (a || info).scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
       return;
     }
     if (b) {
