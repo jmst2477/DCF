@@ -324,6 +324,12 @@
     if (!(ind.id in r.inds)) { try { r.inds[ind.id] = ind.plot(r.d, window.TA) || {}; } catch (e) { r.inds[ind.id] = { error: e.message || String(e) }; } }
     return r.inds[ind.id];
   }
+  // 장전·장후(시간외) 마지막 거래가: 마지막 일봉 종가 대비. 일봉보다 오래된 값이면 버림
+  function extOf(d) {
+    const e = d.ext, L = d.close.length - 1;
+    if (!e || !(e.price > 0) || !e.date || e.date < d.time[L]) return null;
+    return { label: e.session === 'pre' ? '장전' : '장후', price: e.price, chg: e.price / d.close[L] - 1, time: e.time };
+  }
   // 마지막 봉 기준 상태: 오늘 매수 / 오늘 청산 / 보유 구간 / 신호 없음
   function sigState(d, sim) {
     const L = d.close.length - 1;
@@ -1127,10 +1133,11 @@
       pickRates = {};
       STRATS.forEach(x => { const sm = simOf(r, x); if (!sm.error) pickRates[x.id] = statsOf(sm); });
       renderPickers();
-      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span>` +
+      const ex = extOf(r.d);
+      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)}${ex ? ` · <span class="ext-quote">${ex.label} ${fmtP(ex.price)} ${fmtR(ex.chg)}</span>` : ''} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span>` +
         (ss ? ` · <b>승률 ${Math.round(ss.rate * 100)}%</b> <span class="muted small">(거래 ${ss.n}번 · 누적 ${(ss.total * 100).toFixed(0)}%)</span>` : '') + ` <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
       const sets = s0 && !sim0.error ? [{ strat: s0, sim: sim0 }] : [];
-      modalChart = window.SigChart.draw($('#modal-sig'), r.d, sets, activeInds().map(ind => ({ ind, out: indOf(r, ind) })).filter(x => !x.out.error), { bars: 160 });
+      modalChart = window.SigChart.draw($('#modal-sig'), r.d, sets, activeInds().map(ind => ({ ind, out: indOf(r, ind) })).filter(x => !x.out.error), { bars: 160, ext: ex });
       renderSigInfo(r);
     } catch (e) {
       if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
