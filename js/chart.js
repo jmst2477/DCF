@@ -103,6 +103,14 @@
       panes[0].setStretchFactor(1 - sub * (panes.length - 1));
       panes.slice(1).forEach(p => p.setStretchFactor(sub));
     }
+    // 장전·장후 가격: 캔들에는 넣지 않고 점선 가격선으로만 (신호는 정규장 종가로 계산)
+    if (opts.ext) {
+      const xp = opts.ext.price;
+      candles.createPriceLine({ price: xp, color: '#ff9800', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: opts.ext.label });
+      // 실적 발표 뒤처럼 크게 움직여도 점선이 화면 밖으로 나가지 않게 세로 범위에 포함
+      candles.applyOptions({ autoscaleInfoProvider: orig => { const r = orig(); if (r && r.priceRange) { r.priceRange.minValue = Math.min(r.priceRange.minValue, xp); r.priceRange.maxValue = Math.max(r.priceRange.maxValue, xp); } return r; } });
+    }
+
     chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 });
 
     // 왼쪽 위 범례

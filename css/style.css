@@ -216,6 +216,7 @@ body.modal-open { overflow: hidden; }
 .modal-head > div:first-child { flex: 1; min-width: 200px; }
 .modal-title { font-size: 20px; }
 .modal-sub { font-variant-numeric: tabular-nums; }
+.ext-quote { color: #ef6c00; font-weight: 600; }
 .modal-chart { position: relative; flex: 1; min-height: 0; }
 @media (max-width: 760px) {
   .modal { padding: 0; }
