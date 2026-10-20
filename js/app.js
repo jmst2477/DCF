@@ -271,21 +271,6 @@
   }
 
   // ---------- 4. 결과 ----------
-  // ---------- 트레이딩뷰 차트 (무료 위젯) ----------
-  // 트레이딩뷰 무료 위젯 (큰 화면의 "트레이딩뷰" 탭)
-  function loadTv(box, t) {
-    box.innerHTML = '<div class="tradingview-widget-container" style="height:100%;width:100%"><div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div></div>';
-    const sc = document.createElement('script');
-    sc.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-    sc.async = true;
-    sc.textContent = JSON.stringify({
-      autosize: true, symbol: t, interval: 'D', timezone: 'Asia/Seoul', locale: 'kr',
-      theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-      style: '1', allow_symbol_change: false, hide_side_toolbar: false, withdateranges: true, support_host: 'https://www.tradingview.com',
-    });
-    box.firstChild.appendChild(sc);
-  }
-
   // ---------- 매매 신호·차트 지표 (js/strategy.js 의 STRATEGIES, CHART_INDICATORS + "＋ 추가"로 넣은 것) ----------
   const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
@@ -1105,7 +1090,7 @@
   const WL_KEY = 'dcf-watchlist';
   const loadWl = () => { try { const a = JSON.parse(localStorage.getItem(WL_KEY)); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch (e) { return []; } };
   const saveWl = a => { try { localStorage.setItem(WL_KEY, JSON.stringify(a)); } catch (e) { /* 저장 불가 */ } };
-  let watch = loadWl(), modalTicker = null, modalChart = null, modalTab = 'sig', tvTicker = null;
+  let watch = loadWl(), modalTicker = null, modalChart = null;
 
   function openModal(t) {
     t = (t || state.ticker || watch[0] || '').trim().toUpperCase();
@@ -1127,8 +1112,6 @@
     $('#modal-title').textContent = t;
     $('#modal-sub').textContent = '불러오는 중…';
     $('#modal-sub').className = 'modal-sub';
-    if (modalTab === 'tv') { tvTicker = t; loadTv($('#modal-tv'), t); }
-    else tvTicker = null;
     if (modalChart) { modalChart.remove(); modalChart = null; }
     $('#modal-sig').innerHTML = '';
     $('#sig-strats').innerHTML = '';
@@ -1152,13 +1135,6 @@
     } catch (e) {
       if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
     }
-  }
-  function setTab(tab) {
-    modalTab = tab;
-    $$('#chart-modal .tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-    $('#modal-sig').hidden = tab !== 'sig';
-    $('#modal-tv').hidden = tab !== 'tv';
-    if (tab === 'tv' && modalTicker && tvTicker !== modalTicker) { tvTicker = modalTicker; loadTv($('#modal-tv'), modalTicker); }
   }
   function renderWatch() {
     const list = $('#wl-list');
@@ -1196,7 +1172,6 @@
     $('#modal-close').addEventListener('click', closeModal);
   $('#chart-modal').addEventListener('click', e => { if (e.target.id === 'chart-modal') closeModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#chart-modal').hidden) closeModal(); });
-  $$('#chart-modal .tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
   $('#wl-form').addEventListener('submit', e => {
     e.preventDefault();
     const t = $('#wl-input').value.trim().toUpperCase();
