@@ -167,6 +167,7 @@ window.IND = {
 // plot(d, ta)가 돌려주는 것 (모두 선택):
 //   lines:    [{ title, values(봉마다 숫자), color 또는 colors(봉마다 색), width, pane: 'main'(가격 위) | 'sub'(아래 칸), dashed, range: [최소, 최대] }]
 //   hlines:   [{ price, color }]                      아래 칸 가로선
+//   band:     [아래, 위]                              아래 칸에서 두 값 사이를 옅게 칠함 (예: 스토캐스틱 20~80)
 //   segments: [{ from, to, price, color, dashed, text, textPos: 'above'|'below' }]  봉 번호 from~to 가로 선분
 //   marks:    [{ i, text, color, position: 'above'|'below', shape: 'arrowUp'|'arrowDown'|'circle'|'square' }]
 //   status:   { text, tone: 'up'|'down'|'' }        마지막 봉 상태 한 줄 (신호 자세히에 표시)
@@ -215,6 +216,7 @@ window.CHART_INDICATORS = [
           { title: '%D', values: dd, color: '#FF6D00', width: 1.5, pane: 'sub', range: [0, 100] },
         ],
         hlines: [{ price: 80 }, { price: 50 }, { price: 20 }],
+        band: [20, 80], // 트레이딩뷰처럼 20~80 사이를 옅게 칠함
         status: { text: `%K ${k[n].toFixed(1)} · %D ${dd[n].toFixed(1)} · ${zone}${last}`, tone: k[n] <= 20 ? 'up' : k[n] >= 80 ? 'down' : '' },
       };
     },
