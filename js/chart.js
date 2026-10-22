@@ -113,7 +113,11 @@
       color: strat.color,
       text: (m.kind === 'buy' ? '매수 ' : (m.reason || '매도') + ' ') + (m.price || d.close[m.i]).toFixed(2),
     })));
-    if (future.length && future[future.length - 1] === opts.earn.date) candleMarks.push({ i: n - 1 + future.length, time: opts.earn.date, position: 'aboveBar', shape: 'square', color: '#ff9800', text: '실적' + (opts.earn.estimate ? '(예상)' : '') });
+    // 실적 발표일 표시: 빈 칸(whitespace)에 단 표시는 마지막 봉으로 끌려가므로, 그날 점 하나만 가진 보이지 않는 선에 단다
+    if (future.length && future[future.length - 1] === opts.earn.date) {
+      const es = line([{ time: opts.earn.date, value: d.close[n - 1] }], { color: 'rgba(0,0,0,0)', lineVisible: false, pointMarkersVisible: false, autoscaleInfoProvider: () => null });
+      LC.createSeriesMarkers(es, [{ time: opts.earn.date, position: 'inBar', shape: 'square', color: '#ff9800', text: `실적 ${opts.earn.date.slice(5)}${opts.earn.estimate ? ' 예상' : ''}` }]);
+    }
     candleMarks.sort((a, b) => a.i - b.i);
     LC.createSeriesMarkers(candles, candleMarks.map(({ i, ...m }) => m));
 
@@ -131,7 +135,7 @@
       candles.applyOptions({ autoscaleInfoProvider: orig => { const r = orig(); if (r && r.priceRange) { r.priceRange.minValue = Math.min(r.priceRange.minValue, xp); r.priceRange.maxValue = Math.max(r.priceRange.maxValue, xp); } return r; } });
     }
 
-    chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 + future.length });
+    chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 + (future.length ? future.length + 4 : 0) });
 
     // 왼쪽 위 범례
     const lg = document.createElement('div');
