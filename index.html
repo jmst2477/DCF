@@ -140,6 +140,14 @@
       <label class="wl-only small"><input type="checkbox" id="wl-only"> 오늘 매수·청산 신호 종목만</label>
       <ul id="wl-list" class="wl-list"></ul>
       <p id="wl-none" class="muted small" hidden>오늘 이 신호가 난 종목이 없습니다.</p>
+      <div class="sync-box">
+        <div class="sync-row"><span id="sync-status" class="small muted"></span><button type="button" id="sync-btn" class="ghost mini">연결</button></div>
+        <form id="sync-form" class="sync-form" hidden>
+          <input id="sync-pw" type="password" placeholder="비밀번호 (처음이면 새로 정하기)" autocomplete="current-password">
+          <button type="submit" class="mini">확인</button>
+          <p class="muted small">PC와 휴대폰에서 같은 비밀번호를 넣으면 관심종목과 추가한 신호·지표를 같이 씁니다.</p>
+        </form>
+      </div>
     </aside>
     <section class="modal-main">
       <div class="modal-head">
