@@ -8,8 +8,8 @@
   function theme() {
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
     return dark
-      ? { bg: '#131722', text: '#d1d4dc', grid: '#232632', border: '#2a2e39', vol: 0.35 }
-      : { bg: '#ffffff', text: '#191f28', grid: '#f0f3fa', border: '#e0e3eb', vol: 0.3 };
+      ? { bg: '#131722', text: '#d1d4dc', grid: '#232632', border: '#2a2e39', sep: '#5d606b', hline: '#868993', vol: 0.35 }
+      : { bg: '#ffffff', text: '#191f28', grid: '#f0f3fa', border: '#e0e3eb', sep: '#9598a1', hline: '#9598a1', vol: 0.3 };
   }
   const alpha = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, '0');
 
@@ -21,7 +21,7 @@
     const th = theme(), n = d.close.length, T = d.time;
     const chart = LC.createChart(el, {
       autoSize: true,
-      layout: { background: { color: th.bg }, textColor: th.text, fontFamily: 'Pretendard Variable, Pretendard, sans-serif', panes: { separatorColor: th.border } },
+      layout: { background: { color: th.bg }, textColor: th.text, fontFamily: 'Pretendard Variable, Pretendard, sans-serif', panes: { separatorColor: th.sep } },
       grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
       rightPriceScale: { borderColor: th.border },
       timeScale: { borderColor: th.border, rightOffset: 4 },
@@ -31,7 +31,18 @@
 
     // 캔들 + 거래량
     const candles = chart.addSeries(LC.CandlestickSeries, { upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN });
-    candles.setData(T.map((t, i) => ({ time: t, open: d.open[i], high: d.high[i], low: d.low[i], close: d.close[i] })));
+    // 다음 실적 발표일이 45일 안이면 그날까지 빈 칸(평일)을 이어 붙여 차트에 표시
+    const future = [];
+    if (opts.earn && opts.earn.dday <= 45) {
+      const dt = new Date(T[n - 1] + 'T00:00:00Z');
+      while (true) {
+        dt.setUTCDate(dt.getUTCDate() + 1);
+        const s = dt.toISOString().slice(0, 10);
+        if (s > opts.earn.date) break;
+        if (dt.getUTCDay() % 6) future.push(s);
+      }
+    }
+    candles.setData(T.map((t, i) => ({ time: t, open: d.open[i], high: d.high[i], low: d.low[i], close: d.close[i] })).concat(future.map(t => ({ time: t }))));
     const vol = chart.addSeries(LC.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false });
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     vol.setData(T.map((t, i) => ({ time: t, value: d.volume[i] || 0, color: alpha(d.close[i] >= d.open[i] ? UP : DOWN, th.vol) })));
@@ -42,6 +53,7 @@
       return s;
     };
     const candleMarks = [];
+    const subs = []; // 아래 칸마다 왼쪽 위 이름표 (트레이딩뷰처럼 "스토캐스틱 5 3 3  값")
     let nextPane = 1;
 
     // 지표
@@ -62,10 +74,25 @@
         const o = { color: l.color || ind.color || '#787B86', lineWidth: l.width || 1.5, lineStyle: l.dashed ? 2 : 0, title: l.pane === 'sub' ? '' : (l.title || '') };
         if (l.pane === 'sub') o.lastValueVisible = true;
         if (l.range) o.autoscaleInfoProvider = () => ({ priceRange: { minValue: l.range[0], maxValue: l.range[1] } });
-        const s = line(data, o, l.pane === 'sub' ? pane : 0);
+        let s;
+        if (l.hist) { // 막대(히스토그램): 0을 기준으로 위아래
+          s = chart.addSeries(LC.HistogramSeries, { color: o.color, lastValueVisible: false, priceLineVisible: false, base: 0 }, l.pane === 'sub' ? pane : 0);
+          s.setData(data);
+        } else s = line(data, o, l.pane === 'sub' ? pane : 0);
         if (l.pane === 'sub' && !first) first = s;
       });
-      if (first) (out.hlines || []).forEach(h => first.createPriceLine({ price: h.price, color: h.color || '#787B86', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }));
+      if (subLines.length) subs.push({ pane, ind, lines: subLines.filter(l => !l.hist || l.title) });
+      // 구간 칠하기: 위 값에서 아래 값까지 옅은 띠 (BaselineSeries 를 위 값 상수로 그리고 기준선을 아래 값으로)
+      if (first && out.band) {
+        const [lo, hi] = out.band, bandC = alpha(ind.color && ind.color[0] === '#' && ind.color.length === 7 ? ind.color : '#7e57c2', 0.08);
+        const b = chart.addSeries(LC.BaselineSeries, { baseValue: { type: 'price', price: lo }, topFillColor1: bandC, topFillColor2: bandC, topLineColor: 'rgba(0,0,0,0)', bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(0,0,0,0)', bottomFillColor2: 'rgba(0,0,0,0)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null }, pane);
+        b.setData(T.map(t => ({ time: t, value: hi })));
+      }
+      // 아래 칸 안의 점 (예: VuManChu 동그라미)
+      if (first && (out.dots || []).length) {
+        LC.createSeriesMarkers(first, out.dots.filter(o => o.i >= 0 && o.i < n && fix(o.price) !== undefined).map(o => ({ time: T[o.i], position: 'atPriceMiddle', price: o.price, shape: 'circle', size: o.size || 1, color: o.color })));
+      }
+      if (first) (out.hlines || []).forEach(h => first.createPriceLine({ price: h.price, color: h.color || th.hline, lineWidth: 1, lineStyle: 2, axisLabelVisible: false }));
       (out.segments || []).forEach(sg => {
         if (!(sg.from >= 0 && sg.to < n && sg.from < sg.to)) return;
         const s = line([{ time: T[sg.from], value: sg.price }, { time: T[sg.to], value: sg.price }], { color: sg.color || ind.color, lineWidth: 1, lineStyle: sg.dashed ? 2 : 0 });
@@ -84,8 +111,13 @@
       position: m.kind === 'buy' ? 'belowBar' : 'aboveBar',
       shape: m.kind === 'buy' ? 'arrowUp' : 'arrowDown',
       color: strat.color,
-      text: (m.kind === 'buy' ? '매수 ' : '매도 ') + d.close[m.i].toFixed(2),
+      text: (m.kind === 'buy' ? '매수 ' : (m.reason || '매도') + ' ') + (m.price || d.close[m.i]).toFixed(2),
     })));
+    // 실적 발표일 표시: 빈 칸(whitespace)에 단 표시는 마지막 봉으로 끌려가므로, 그날 점 하나만 가진 보이지 않는 선에 단다
+    if (future.length && future[future.length - 1] === opts.earn.date) {
+      const es = line([{ time: opts.earn.date, value: d.close[n - 1] }], { color: 'rgba(0,0,0,0)', lineVisible: false, pointMarkersVisible: false, autoscaleInfoProvider: () => null });
+      LC.createSeriesMarkers(es, [{ time: opts.earn.date, position: 'inBar', shape: 'square', color: '#ff9800', text: `실적 ${opts.earn.date.slice(5)}${opts.earn.estimate ? ' 예상' : ''}` }]);
+    }
     candleMarks.sort((a, b) => a.i - b.i);
     LC.createSeriesMarkers(candles, candleMarks.map(({ i, ...m }) => m));
 
@@ -95,15 +127,54 @@
       panes[0].setStretchFactor(1 - sub * (panes.length - 1));
       panes.slice(1).forEach(p => p.setStretchFactor(sub));
     }
-    chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 });
+    // 장전·장후 가격: 캔들에는 넣지 않고 점선 가격선으로만 (신호는 정규장 종가로 계산)
+    if (opts.ext) {
+      const xp = opts.ext.price;
+      candles.createPriceLine({ price: xp, color: '#ff9800', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: opts.ext.label });
+      // 실적 발표 뒤처럼 크게 움직여도 점선이 화면 밖으로 나가지 않게 세로 범위에 포함
+      candles.applyOptions({ autoscaleInfoProvider: orig => { const r = orig(); if (r && r.priceRange) { r.priceRange.minValue = Math.min(r.priceRange.minValue, xp); r.priceRange.maxValue = Math.max(r.priceRange.maxValue, xp); } return r; } });
+    }
+
+    chart.timeScale().setVisibleLogicalRange({ from: n - (opts.bars || 130), to: n + 3 + (future.length ? future.length + 4 : 0) });
 
     // 왼쪽 위 범례
     const lg = document.createElement('div');
     lg.className = 'chart-legend';
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     lg.innerHTML = sets.map(({ strat }) => `<span><i style="background:${strat.color}"></i><b>${esc(strat.name)}</b> ▲매수 ▼매도</span>`).join('') +
-      inds.map(({ ind }) => `<span><i style="background:${ind.color || '#787B86'}"></i>${esc(ind.name)}</span>`).join('');
+      inds.filter(({ ind }) => !subs.some(s => s.ind === ind)).map(({ ind }) => `<span><i style="background:${ind.color || '#787B86'}"></i>${esc(ind.name)}</span>`).join('');
     el.appendChild(lg);
+
+    // 아래 칸 이름표: 이름 + 선마다 값 (마우스를 올린 날의 값, 아니면 마지막 값)
+    const short = s => String(s).replace(/\s*\(([^)]*)\)/, (m, a) => ' ' + a.replace(/,\s*/g, ' '));
+    const num = v => (Number.isFinite(v) ? (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(2)) : '–');
+    let tags = [], cur = n - 1;
+    const fill = i => tags.forEach(({ s, tag }) => {
+      tag.innerHTML = `<b>${esc(short(s.ind.name))}</b>` + s.lines.map(l => `<span style="color:${l.color || s.ind.color || th.text}">${num((l.values || [])[i])}</span>`).join('');
+    });
+    // 칸의 HTML 요소는 차트가 한 번 그려진 뒤에 생기므로 다음 프레임에 붙인다
+    const mount = (tries = 0) => {
+      const hosts = subs.map(s => chart.panes()[s.pane] && chart.panes()[s.pane].getHTMLElement());
+      if (hosts.some(h => !h)) { if (tries < 20) requestAnimationFrame(() => mount(tries + 1)); return; }
+      tags = subs.map((s, k) => {
+        // 칸 요소가 표의 줄(tr)이면 그래프가 그려지는 가장 넓은 칸(td)에 붙인다
+        let host = hosts[k];
+        if (host.tagName === 'TR') host = [...host.children].reduce((a, c) => (c.offsetWidth > a.offsetWidth ? c : a), host.children[0]) || host;
+        hosts[k] = host;
+        host.style.position = 'relative';
+        const tag = document.createElement('div');
+        tag.className = 'pane-label';
+        hosts[k].appendChild(tag);
+        return { s, tag };
+      });
+      fill(cur);
+    };
+    if (subs.length) mount();
+    chart.subscribeCrosshairMove(p => {
+      const i = p && p.logical != null ? Math.round(p.logical) : n - 1;
+      cur = i >= 0 && i < n ? i : n - 1;
+      fill(cur);
+    });
     return chart;
   }
 

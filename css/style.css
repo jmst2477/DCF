@@ -187,6 +187,8 @@ ol.guide li { margin: 4px 0; }
 .title-row { display: flex; align-items: center; gap: 12px; }
 .chart-btn { padding: 7px 14px; font-size: 14px; }
 .chart-legend { position: absolute; top: 6px; left: 8px; z-index: 3; display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11px; color: var(--sub); pointer-events: none; max-width: 75%; }
+.pane-label { position: absolute; top: 0; left: 0; right: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 8px 2px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--sub); pointer-events: none; }
+.pane-label b { color: var(--text); font-weight: 600; }
 .chart-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 /* 큰 화면 */
 body.modal-open { overflow: hidden; }
@@ -216,9 +218,11 @@ body.modal-open { overflow: hidden; }
 .modal-head > div:first-child { flex: 1; min-width: 200px; }
 .modal-title { font-size: 20px; }
 .modal-sub { font-variant-numeric: tabular-nums; }
-.tabs { display: flex; background: var(--soft); border-radius: 10px; padding: 3px; }
-.tabs button { background: transparent; color: var(--sub); padding: 6px 12px; font-size: 13px; border-radius: 8px; }
-.tabs button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.ext-quote { color: #ef6c00; font-weight: 600; }
+.earn-tag { color: var(--sub); }
+.earn-tag.near, .earn-warn { color: #e65100; font-weight: 600; }
+.earn-warn { margin: 4px 0; }
+.sig-pill.earn { background: color-mix(in srgb, #ff9800 18%, var(--card)); color: #e65100; }
 .modal-chart { position: relative; flex: 1; min-height: 0; }
 @media (max-width: 760px) {
   .modal { padding: 0; }
@@ -248,6 +252,19 @@ body.modal-open { overflow: hidden; }
 .ind-pick .chip { padding: 4px 10px; font-size: 12px; }
 .chip-rate { font-size: 11px; font-weight: 700; color: var(--sub); background: var(--soft); border-radius: 999px; padding: 1px 7px; margin-left: 2px; }
 .chip.on .chip-rate { color: var(--c); background: var(--card); }
+.bt-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.bt-years { display: inline-flex; gap: 6px; }
+.bt-pick .chip { padding: 4px 10px; font-size: 12px; }
+.bt-in { display: inline-flex; flex-direction: row; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--sub); }
+.bt-in input { width: 64px; padding: 4px 6px; font-size: 13px; margin: 0 2px; }
+.chip.info { color: var(--sub); background: var(--soft); border-color: transparent; }
+.chip.info.on { --c: var(--accent); color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.sig-about { margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--soft); }
+.sig-about h4 { margin: 0 0 6px; font-size: 14px; }
+.sig-about dl { margin: 0; display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 14px; line-height: 1.55; }
+.sig-about dt { font-weight: 700; color: var(--text); }
+.sig-about dd { margin: 0; color: var(--sub); }
+@media (max-width: 760px) { .sig-about dl { grid-template-columns: 1fr; gap: 2px; } .sig-about dd { margin-bottom: 8px; } }
 .chip.add { border-style: dashed; color: var(--accent); background: transparent; }
 .chip.add:hover { border-color: var(--accent); }
 /* 관심종목 승률 */
@@ -308,6 +325,8 @@ body.modal-open { overflow: hidden; }
   .strat-pick, .ind-pick { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
   .strat-pick .chip, .ind-pick .chip { flex: none; }
   .pick-label { width: 24px; }
+  .bt-pick { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .bt-years, .bt-in { flex: none; }
   .add-panel { padding: 0; }
   .add-box { border-radius: 0; min-height: 100%; }
 }
