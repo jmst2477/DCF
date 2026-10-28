@@ -335,3 +335,10 @@ body.modal-open { overflow: hidden; }
 .wl-grip:hover { color: var(--text); }
 .wl-list li.dragging { background: var(--soft); box-shadow: 0 2px 10px rgba(0, 0, 0, .18); opacity: .9; }
 .wl-list li.dragging .wl-grip { cursor: grabbing; }
+/* 테마 (전력, 우주 …) */
+.wl-themes { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 2px 8px; }
+.wl-themes .chip { --c: var(--accent); padding: 3px 9px; font-size: 12px; gap: 4px; }
+.wl-name { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.wl-theme { font-size: 10.5px; font-weight: 600; color: var(--accent); background: var(--accent-weak); border-radius: 6px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; cursor: pointer; }
+.wl-theme.none { color: var(--muted); background: transparent; border: 1px dashed var(--line); font-weight: 500; }
+.wl-theme:hover { color: var(--text); }

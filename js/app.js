@@ -1185,6 +1185,21 @@
   let watch = loadWl(), modalTicker = null, modalChart = null;
   let holds = [].concat(lsGet(HOLD_KEY, [])).filter(x => typeof x === 'string' && watch.includes(x));
   const saveHolds = () => lsSet(HOLD_KEY, holds);
+  // 테마(전력, 우주 …): 종목마다 하나씩 붙이고 위 칩으로 골라 봅니다
+  const THEME_KEY = 'dcf-themes', THEME_PICK_KEY = 'dcf-theme-pick';
+  let themes = (o => o && typeof o === 'object' && !Array.isArray(o) ? o : {})(lsGet(THEME_KEY, {}));
+  Object.keys(themes).forEach(t => { if (!watch.includes(t) || typeof themes[t] !== 'string' || !themes[t]) delete themes[t]; });
+  let themePick = lsGet(THEME_PICK_KEY, '');
+  const saveThemes = () => lsSet(THEME_KEY, themes);
+  const themeList = () => [...new Set(watch.map(t => themes[t]).filter(Boolean))];
+  const shown = t => !themePick || themes[t] === themePick;
+  function renderThemes() {
+    const box = $('#wl-themes'), list = themeList();
+    if (themePick && !list.includes(themePick)) { themePick = ''; lsSet(THEME_PICK_KEY, ''); }
+    box.hidden = !list.length;
+    box.innerHTML = [['', '전체', watch.length], ...list.map(x => [x, x, watch.filter(t => themes[t] === x).length])]
+      .map(([v, label, n]) => `<button type="button" class="chip ${v === themePick ? 'on' : ''}" data-theme-pick="${esc(v)}">${esc(label)} <span class="muted">${n}</span></button>`).join('');
+  }
 
   function openModal(t) {
     t = (t || state.ticker || watch[0] || '').trim().toUpperCase();
@@ -1234,19 +1249,20 @@
   function renderWatch() {
     const list = $('#wl-list');
     const cur = (state.ticker || '').trim().toUpperCase();
-    const held = watch.filter(t => holds.includes(t)), rest = watch.filter(t => !holds.includes(t));
+    renderThemes();
+    const held = watch.filter(t => holds.includes(t) && shown(t)), rest = watch.filter(t => !holds.includes(t) && shown(t));
     const items = [...(cur && !watch.includes(cur) ? [cur] : []), ...held, ...rest];
     const row = t => {
       const saved = watch.includes(t), h = holds.includes(t);
       return `
       <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}"${saved ? ' data-saved="1"' : ''}>
-        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><b>${esc(t)}</b><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
+        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><span class="wl-name"><b>${esc(t)}</b>${saved ? `<span class="wl-theme ${themes[t] ? '' : 'none'}" data-theme-t="${esc(t)}" title="테마 정하기 (예: 전력, 우주)">${themes[t] ? esc(themes[t]) : '＋테마'}</span>` : ''}</span><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
         ${saved ? `<button type="button" class="wl-kind ${h ? 'hold' : ''}" data-kind="${esc(t)}" title="${h ? '누르면 관심종목으로 옮깁니다' : '실제로 갖고 있으면 누르세요 (보유로 옮김)'}">${h ? '보유' : '관심'}</button><button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
       </li>`;
     };
     const sec = (title, arr, empty, k) => `<li class="wl-sec" data-sec="${k}">${title} <span class="muted">${arr.length}</span></li>` + (arr.length ? arr.map(row).join('') : `<li class="muted small wl-empty">${empty}</li>`);
     list.innerHTML = (cur && !watch.includes(cur) ? row(cur) : '') +
-      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르거나 여기로 끌어 오면 보유로 옮겨집니다.', 'hold') + sec('관심 종목', rest, '지켜볼 종목을 위에서 추가하세요.', 'watch')
+      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르거나 여기로 끌어 오면 보유로 옮겨집니다.', 'hold') + sec('관심 종목', rest, themePick ? `'${esc(themePick)}' 테마의 관심 종목이 없습니다.` : '지켜볼 종목을 위에서 추가하세요.', 'watch')
         : '<li class="muted small wl-empty">관심종목이 없습니다. 위에 티커를 넣고 추가하세요.</li>');
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
@@ -1270,6 +1286,7 @@
     if (!/^[A-Z0-9.\-^=]{1,15}$/.test(t)) return false;
     if (!watch.includes(t)) { watch.push(t); saveWl(watch); }
     if (hold && !holds.includes(t)) { holds.push(t); saveHolds(); }
+    if (themePick && !themes[t]) { themes[t] = themePick; saveThemes(); } // 테마를 고른 채 추가하면 그 테마로
     return true;
   }
 
@@ -1279,10 +1296,12 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#chart-modal').hidden) closeModal(); });
   $('#wl-form').addEventListener('submit', e => {
     e.preventDefault();
-    const t = $('#wl-input').value.trim().toUpperCase();
-    if (!addWatch(t, $('#wl-kind').value === 'hold')) return;
+    // 리포트 종목을 한 번에: "GEV BE CEG" 처럼 띄어 쓰거나 쉼표로 여러 개
+    const ts = $('#wl-input').value.toUpperCase().split(/[\s,]+/).filter(Boolean);
+    const ok = ts.filter(t => addWatch(t, $('#wl-kind').value === 'hold'));
+    if (!ok.length) return;
     $('#wl-input').value = '';
-    showModalTicker(t);
+    showModalTicker(ok[0]);
   });
   // "오늘 매수·청산 신호 종목만": 해당 종목이 없으면 안내 문구
   function updateOnly() {
@@ -1291,9 +1310,25 @@
     $('#wl-none').hidden = !on || !!$('#wl-list li[data-sig="buy"], #wl-list li[data-sig="sell"]');
   }
   $('#wl-only').addEventListener('change', updateOnly);
+  $('#wl-themes').addEventListener('click', e => {
+    const c = e.target.closest('[data-theme-pick]');
+    if (!c) return;
+    themePick = c.dataset.themePick;
+    lsSet(THEME_PICK_KEY, themePick);
+    renderWatch();
+  });
   $('#wl-list').addEventListener('click', e => {
     const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), kind = e.target.closest('[data-kind]'), pick = e.target.closest('.wl-pick');
-    if (del) { watch = watch.filter(x => x !== del.dataset.del); holds = holds.filter(x => x !== del.dataset.del); saveWl(watch); saveHolds(); renderWatch(); return; }
+    const th = e.target.closest('[data-theme-t]');
+    if (th) {
+      const t = th.dataset.themeT, have = themeList();
+      const v = prompt(`${t} 테마 이름 (예: 전력, 우주)${have.length ? '\n지금 있는 테마: ' + have.join(', ') : ''}\n비우면 테마를 뺍니다.`, themes[t] || themePick || '');
+      if (v == null) return;
+      const name = v.trim().slice(0, 12);
+      if (name) themes[t] = name; else delete themes[t];
+      saveThemes(); renderWatch(); return;
+    }
+    if (del) { watch = watch.filter(x => x !== del.dataset.del); holds = holds.filter(x => x !== del.dataset.del); delete themes[del.dataset.del]; saveWl(watch); saveHolds(); saveThemes(); renderWatch(); return; }
     if (kind) { const t = kind.dataset.kind; holds = holds.includes(t) ? holds.filter(x => x !== t) : [...holds, t]; saveHolds(); renderWatch(); return; }
     if (add) { addWatch(add.dataset.add); renderWatch(); return; }
     if (pick) showModalTicker(pick.closest('li').dataset.t);
@@ -1331,7 +1366,10 @@
       if (x.dataset.sec) kind = x.dataset.sec;
       else if (x.dataset.saved) { order.push(x.dataset.t); if (kind === 'hold') hold.push(x.dataset.t); }
     });
-    watch = order; holds = hold;
+    // 테마로 거른 상태면 화면에 보이던 종목 자리만 새 순서로 채우고, 안 보이던 종목은 그대로 둡니다
+    let k = 0;
+    watch = watch.map(t => order.includes(t) ? order[k++] : t);
+    holds = [...holds.filter(t => !order.includes(t)), ...hold];
     saveWl(watch); saveHolds(); renderWatch();
   };
   document.addEventListener('pointerup', endDrag);
