@@ -1185,12 +1185,15 @@
   let watch = loadWl(), modalTicker = null, modalChart = null;
   let holds = [].concat(lsGet(HOLD_KEY, [])).filter(x => typeof x === 'string' && watch.includes(x));
   const saveHolds = () => lsSet(HOLD_KEY, holds);
-  // 테마(전력, 우주 …): 종목마다 하나씩 붙이고 위 칩으로 골라 봅니다
+  // 테마(전력, 우주 …): 종목마다 하나씩 붙이고 위 칩으로 골라 봅니다.
+  // 처음엔 js/themes.js가 자동으로 붙이고(사전 → 야후 업종), 사용자가 바꾸거나 뺀 것('')은 그대로 둡니다.
   const THEME_KEY = 'dcf-themes', THEME_PICK_KEY = 'dcf-theme-pick';
   let themes = (o => o && typeof o === 'object' && !Array.isArray(o) ? o : {})(lsGet(THEME_KEY, {}));
-  Object.keys(themes).forEach(t => { if (!watch.includes(t) || typeof themes[t] !== 'string' || !themes[t]) delete themes[t]; });
+  Object.keys(themes).forEach(t => { if (!watch.includes(t) || typeof themes[t] !== 'string') delete themes[t]; });
+  const autoTheme = (t, profile) => { if (t in themes) return false; const g = window.THEMES.guess(t, profile); if (g) themes[t] = g; return !!g; };
   let themePick = lsGet(THEME_PICK_KEY, '');
   const saveThemes = () => lsSet(THEME_KEY, themes);
+  if (watch.filter(t => autoTheme(t)).length) saveThemes();
   const themeList = () => [...new Set(watch.map(t => themes[t]).filter(Boolean))];
   const shown = t => !themePick || themes[t] === themePick;
   function renderThemes() {
@@ -1275,6 +1278,12 @@
       if (rt && sim0 && !sim0.error) rt.textContent = rateTxt(statsOf(sim0));
       const li = el.closest('li');
       if (li) li.dataset.sig = st.cls;
+      // 사전에 없는 종목은 야후 업종으로 테마를 붙입니다
+      if (watch.includes(t) && autoTheme(t, r.d.profile)) {
+        saveThemes(); renderThemes();
+        const tg = list.querySelector(`.wl-theme[data-theme-t="${CSS.escape(t)}"]`);
+        if (tg) { tg.textContent = themes[t]; tg.classList.remove('none'); }
+      }
       updateOnly();
     }, () => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
@@ -1286,7 +1295,9 @@
     if (!/^[A-Z0-9.\-^=]{1,15}$/.test(t)) return false;
     if (!watch.includes(t)) { watch.push(t); saveWl(watch); }
     if (hold && !holds.includes(t)) { holds.push(t); saveHolds(); }
-    if (themePick && !themes[t]) { themes[t] = themePick; saveThemes(); } // 테마를 고른 채 추가하면 그 테마로
+    if (themePick && !themes[t]) themes[t] = themePick; // 테마를 고른 채 추가하면 그 테마로
+    else autoTheme(t);
+    saveThemes();
     return true;
   }
 
@@ -1325,7 +1336,7 @@
       const v = prompt(`${t} 테마 이름 (예: 전력, 우주)${have.length ? '\n지금 있는 테마: ' + have.join(', ') : ''}\n비우면 테마를 뺍니다.`, themes[t] || themePick || '');
       if (v == null) return;
       const name = v.trim().slice(0, 12);
-      if (name) themes[t] = name; else delete themes[t];
+      themes[t] = name; // 비우면 '' (자동 테마도 다시 붙이지 않음)
       saveThemes(); renderWatch(); return;
     }
     if (del) { watch = watch.filter(x => x !== del.dataset.del); holds = holds.filter(x => x !== del.dataset.del); delete themes[del.dataset.del]; saveWl(watch); saveHolds(); saveThemes(); renderWatch(); return; }

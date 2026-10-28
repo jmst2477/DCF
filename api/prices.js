@@ -1,7 +1,7 @@
 // Vercel 서버리스 함수: /api/prices?ticker=AAPL
 // 매수 신호 계산용 일봉(시가·고가·저가·종가·거래량) 약 2년치를 야후 파이낸스에서 가져온다. API 키 불필요.
 // 가격은 트레이딩뷰 기본 차트처럼 액면분할만 반영하고 배당은 반영하지 않은 값(close)이다.
-// 다음 실적 발표일은 quoteSummary(calendarEvents)에서 받아 earnings 로 붙인다 (예정일이 안 잡혔으면 추정일, 범위면 첫날).
+// 다음 실적 발표일은 quoteSummary(calendarEvents)에서 받아 earnings 로, 업종(assetProfile)은 profile 로 붙인다 (예정일이 안 잡혔으면 추정일, 범위면 첫날).
 // 장전·장후(시간외) 가격은 일봉에 들어가지 않으므로 5분봉을 따로 받아 마지막 시간외 거래가를 ext 로 붙인다.
 
 import { yahooSession } from "./dcf-inputs.js";
@@ -75,13 +75,20 @@ export function nextEarnings(qs) {
   return { date: ds[0], end: ds.length > 1 ? ds[ds.length - 1] : null, estimate: !!e.isEarningsDateEstimate };
 }
 
-async function earnings(ticker) {
+// 업종(assetProfile): 관심종목 테마를 자동으로 붙일 때 씁니다 (사이트 사전에 없는 종목만)
+export function profileOf(qs) {
+  const q = (qs && qs.quoteSummary && qs.quoteSummary.result && qs.quoteSummary.result[0]) || {};
+  const a = q.assetProfile || {};
+  return a.sector || a.industry ? { sector: a.sector || null, industry: a.industry || null } : null;
+}
+async function summary(ticker) {
   const { H, crumb } = await yahooSession();
   const r = await fetch(
-    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=calendarEvents&crumb=${encodeURIComponent(crumb)}`,
+    `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=calendarEvents,assetProfile&crumb=${encodeURIComponent(crumb)}`,
     { headers: H }
   );
-  return nextEarnings(JSON.parse(await r.text()));
+  const qs = JSON.parse(await r.text());
+  return { earnings: nextEarnings(qs), profile: profileOf(qs) };
 }
 
 export default async function handler(req, res) {
@@ -91,7 +98,7 @@ export default async function handler(req, res) {
   }
   const range = ["1y", "2y", "5y"].includes(req.query.range) ? req.query.range : "2y";
   // 실적 발표일은 따로 받고, 실패해도 차트는 그린다
-  const earn = earnings(ticker).catch(() => null);
+  const sum = summary(ticker).catch(() => ({}));
   try {
     let r, H = { "User-Agent": UA }, crumb;
     try {
@@ -107,6 +114,7 @@ export default async function handler(req, res) {
     } catch {
       /* 시간외 가격은 없어도 차트는 그린다 */
     }
+    const info = await sum;
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=3600");
     return res.status(200).json({
       ticker,
@@ -115,7 +123,8 @@ export default async function handler(req, res) {
       lastPrice: (r.meta && r.meta.regularMarketPrice) || bars.close[bars.close.length - 1],
       lastTime: r.meta && r.meta.regularMarketTime ? new Date(r.meta.regularMarketTime * 1000).toISOString() : null,
       ext,
-      earnings: await earn,
+      earnings: info.earnings || null,
+      profile: info.profile || null,
       ...bars,
     });
   } catch (e) {
