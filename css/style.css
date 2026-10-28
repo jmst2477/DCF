@@ -194,7 +194,7 @@ ol.guide li { margin: 4px 0; }
 body.modal-open { overflow: hidden; }
 .modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.55); display: flex; padding: 16px; }
 .modal-box { flex: 1; display: flex; background: var(--card); border-radius: 16px; overflow: hidden; min-width: 0; }
-.wl { width: 230px; flex: none; border-right: 1px solid var(--line); padding: 14px 12px; overflow-y: auto; }
+.wl { width: 256px; flex: none; border-right: 1px solid var(--line); padding: 14px 12px; overflow-y: auto; }
 .wl-form { display: flex; gap: 6px; }
 .wl-form input { flex: 1; min-width: 0; text-transform: uppercase; padding: 7px 10px; }
 .wl-title { margin: 12px 2px 6px; }
@@ -205,7 +205,7 @@ body.modal-open { overflow: hidden; }
 .wl-pick { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 6px; background: transparent; color: var(--text); padding: 9px 8px; font-weight: 500; text-align: left; }
 .wl-pick:hover { background: var(--soft); }
 .wl-val { font-size: 13px; white-space: nowrap; }
-.wl-del, .wl-add { background: transparent; color: var(--muted); padding: 6px 8px; font-size: 13px; }
+.wl-del, .wl-add { background: transparent; color: var(--muted); padding: 6px 5px; font-size: 13px; }
 .wl-del:hover, .wl-add:hover { background: var(--soft); color: var(--text); }
 .sig-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; color: #fff; background: var(--muted); }
 .sig-pill.buy { background: var(--up); }
@@ -331,3 +331,7 @@ body.modal-open { overflow: hidden; }
 .wl-kind { flex: none; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
 .wl-kind.hold { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
 .wl-kind:hover { color: var(--text); border-color: var(--sub); }
+.wl-grip { flex: none; cursor: grab; touch-action: none; user-select: none; color: var(--muted); font-size: 12px; letter-spacing: -3px; padding: 10px 2px 10px 0; }
+.wl-grip:hover { color: var(--text); }
+.wl-list li.dragging { background: var(--soft); box-shadow: 0 2px 10px rgba(0, 0, 0, .18); opacity: .9; }
+.wl-list li.dragging .wl-grip { cursor: grabbing; }

@@ -384,13 +384,13 @@
     if (dday < 0) return null;
     return { date: e.date, dday, estimate: e.estimate, near: dday <= 7, text: `실적 발표 ${e.date.slice(5)}${e.estimate ? ' 예상' : ''} (${dday ? 'D-' + dday : '오늘'})` };
   }
-  // 마지막 봉 기준 상태: 오늘 매수 / 오늘 청산 / 보유 구간 / 신호 없음
+  // 마지막 봉 기준 상태: 오늘 매수 / 오늘 청산 / 매수 유지 / 신호 없음
   function sigState(d, sim) {
     const L = d.close.length - 1;
     if (!sim || sim.error) return { cls: 'none', text: '계산 오류', short: '' };
     if (sim.out.buy[L]) return { cls: 'buy', text: '오늘 매수 신호', short: '매수' };
     if (sim.out.exit[L] && sim.pos) return { cls: 'sell', text: '오늘 청산 신호', short: '청산' };
-    if (sim.pos) return { cls: 'hold', text: '보유 구간 · 청산 신호 기다리는 중', short: '보유' };
+    if (sim.pos) return { cls: 'hold', text: '매수 유지 중 · 청산 신호 기다리는 중', short: '매수 유지' };
     return { cls: 'none', text: '오늘은 신호 없음', short: '' };
   }
 
@@ -1239,14 +1239,14 @@
     const row = t => {
       const saved = watch.includes(t), h = holds.includes(t);
       return `
-      <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}">
-        <button type="button" class="wl-pick"><span class="wl-left"><b>${esc(t)}</b><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
+      <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}"${saved ? ' data-saved="1"' : ''}>
+        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><b>${esc(t)}</b><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
         ${saved ? `<button type="button" class="wl-kind ${h ? 'hold' : ''}" data-kind="${esc(t)}" title="${h ? '누르면 관심종목으로 옮깁니다' : '실제로 갖고 있으면 누르세요 (보유로 옮김)'}">${h ? '보유' : '관심'}</button><button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
       </li>`;
     };
-    const sec = (title, arr, empty) => `<li class="wl-sec">${title} <span class="muted">${arr.length}</span></li>` + (arr.length ? arr.map(row).join('') : `<li class="muted small wl-empty">${empty}</li>`);
+    const sec = (title, arr, empty, k) => `<li class="wl-sec" data-sec="${k}">${title} <span class="muted">${arr.length}</span></li>` + (arr.length ? arr.map(row).join('') : `<li class="muted small wl-empty">${empty}</li>`);
     list.innerHTML = (cur && !watch.includes(cur) ? row(cur) : '') +
-      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르면 보유로 옮겨집니다.') + sec('관심 종목', rest, '지켜볼 종목을 위에서 추가하세요.')
+      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르거나 여기로 끌어 오면 보유로 옮겨집니다.', 'hold') + sec('관심 종목', rest, '지켜볼 종목을 위에서 추가하세요.', 'watch')
         : '<li class="muted small wl-empty">관심종목이 없습니다. 위에 티커를 넣고 추가하세요.</li>');
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
@@ -1298,6 +1298,44 @@
     if (add) { addWatch(add.dataset.add); renderWatch(); return; }
     if (pick) showModalTicker(pick.closest('li').dataset.t);
   });
+
+  // 손잡이(⋮⋮)를 끌어 순서 바꾸기 · 보유/관심 칸 옮기기 (마우스·터치 모두)
+  let drag = null;
+  $('#wl-list').addEventListener('pointerdown', e => {
+    const grip = e.target.closest('.wl-grip');
+    if (!grip || e.button > 0) return;
+    e.preventDefault();
+    const li = grip.closest('li');
+    li.classList.add('dragging');
+    drag = { li, id: e.pointerId };
+  });
+  // 줄을 옮기면 포인터 캡처가 풀리므로 문서 전체에서 받습니다
+  document.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const list = $('#wl-list'), box = list.closest('.wl'), r = box.getBoundingClientRect();
+    if (e.clientY < r.top + 30) box.scrollTop -= 8;
+    else if (e.clientY > r.bottom - 30) box.scrollTop += 8;
+    const first = list.querySelector('.wl-sec');
+    const others = [...list.children].filter(x => x !== drag.li && (x.dataset.saved || x.classList.contains('wl-sec')) && (first.compareDocumentPosition(x) & 4 || x === first));
+    const below = others.find(x => { const b = x.getBoundingClientRect(); return e.clientY < b.top + b.height / 2; });
+    if (below === first) list.insertBefore(drag.li, first.nextSibling);
+    else if (below) list.insertBefore(drag.li, below);
+    else list.appendChild(drag.li);
+  });
+  const endDrag = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag.li.classList.remove('dragging');
+    drag = null;
+    let kind = null; const order = [], hold = [];
+    [...$('#wl-list').children].forEach(x => {
+      if (x.dataset.sec) kind = x.dataset.sec;
+      else if (x.dataset.saved) { order.push(x.dataset.t); if (kind === 'hold') hold.push(x.dataset.t); }
+    });
+    watch = order; holds = hold;
+    saveWl(watch); saveHolds(); renderWatch();
+  };
+  document.addEventListener('pointerup', endDrag);
+  document.addEventListener('pointercancel', endDrag);
 
   // ---------- "＋ 신호 추가 / ＋ 지표 추가": 파인스크립트를 붙여 넣으면 사이트가 직접 읽어서(js/pine.js) 목록에 추가 ----------
   // 코드를 실행하지 않고 글자를 읽어 정해진 계산만 합니다. 추가한 것은 이 브라우저에만 저장됩니다 (localStorage).
