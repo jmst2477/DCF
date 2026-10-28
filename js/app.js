@@ -1180,7 +1180,11 @@
   const WL_KEY = 'dcf-watchlist';
   const loadWl = () => { try { const a = JSON.parse(localStorage.getItem(WL_KEY)); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch (e) { return []; } };
   const saveWl = a => { try { localStorage.setItem(WL_KEY, JSON.stringify(a)); } catch (e) { /* 저장 불가 */ } };
+  // 실제 보유 종목은 관심종목 중 따로 표시 (이 브라우저에만 저장)
+  const HOLD_KEY = 'dcf-holdings';
   let watch = loadWl(), modalTicker = null, modalChart = null;
+  let holds = [].concat(lsGet(HOLD_KEY, [])).filter(x => typeof x === 'string' && watch.includes(x));
+  const saveHolds = () => lsSet(HOLD_KEY, holds);
 
   function openModal(t) {
     t = (t || state.ticker || watch[0] || '').trim().toUpperCase();
@@ -1230,12 +1234,20 @@
   function renderWatch() {
     const list = $('#wl-list');
     const cur = (state.ticker || '').trim().toUpperCase();
-    const items = cur && !watch.includes(cur) ? [cur, ...watch] : watch;
-    list.innerHTML = items.length ? items.map(t => `
+    const held = watch.filter(t => holds.includes(t)), rest = watch.filter(t => !holds.includes(t));
+    const items = [...(cur && !watch.includes(cur) ? [cur] : []), ...held, ...rest];
+    const row = t => {
+      const saved = watch.includes(t), h = holds.includes(t);
+      return `
       <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}">
         <button type="button" class="wl-pick"><span class="wl-left"><b>${esc(t)}</b><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
-        ${watch.includes(t) ? `<button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
-      </li>`).join('') : '<li class="muted small wl-empty">관심종목이 없습니다. 위에 티커를 넣고 추가하세요.</li>';
+        ${saved ? `<button type="button" class="wl-kind ${h ? 'hold' : ''}" data-kind="${esc(t)}" title="${h ? '누르면 관심종목으로 옮깁니다' : '실제로 갖고 있으면 누르세요 (보유로 옮김)'}">${h ? '보유' : '관심'}</button><button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
+      </li>`;
+    };
+    const sec = (title, arr, empty) => `<li class="wl-sec">${title} <span class="muted">${arr.length}</span></li>` + (arr.length ? arr.map(row).join('') : `<li class="muted small wl-empty">${empty}</li>`);
+    list.innerHTML = (cur && !watch.includes(cur) ? row(cur) : '') +
+      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르면 보유로 옮겨집니다.') + sec('관심 종목', rest, '지켜볼 종목을 위에서 추가하세요.')
+        : '<li class="muted small wl-empty">관심종목이 없습니다. 위에 티커를 넣고 추가하세요.</li>');
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
       if (!el) return;
@@ -1253,10 +1265,11 @@
       if (el) el.innerHTML = '<span class="muted">조회 실패</span>';
     }));
   }
-  function addWatch(t) {
+  function addWatch(t, hold) {
     t = (t || '').trim().toUpperCase();
     if (!/^[A-Z0-9.\-^=]{1,15}$/.test(t)) return false;
     if (!watch.includes(t)) { watch.push(t); saveWl(watch); }
+    if (hold && !holds.includes(t)) { holds.push(t); saveHolds(); }
     return true;
   }
 
@@ -1267,7 +1280,7 @@
   $('#wl-form').addEventListener('submit', e => {
     e.preventDefault();
     const t = $('#wl-input').value.trim().toUpperCase();
-    if (!addWatch(t)) return;
+    if (!addWatch(t, $('#wl-kind').value === 'hold')) return;
     $('#wl-input').value = '';
     showModalTicker(t);
   });
@@ -1279,8 +1292,9 @@
   }
   $('#wl-only').addEventListener('change', updateOnly);
   $('#wl-list').addEventListener('click', e => {
-    const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), pick = e.target.closest('.wl-pick');
-    if (del) { watch = watch.filter(x => x !== del.dataset.del); saveWl(watch); renderWatch(); return; }
+    const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), kind = e.target.closest('[data-kind]'), pick = e.target.closest('.wl-pick');
+    if (del) { watch = watch.filter(x => x !== del.dataset.del); holds = holds.filter(x => x !== del.dataset.del); saveWl(watch); saveHolds(); renderWatch(); return; }
+    if (kind) { const t = kind.dataset.kind; holds = holds.includes(t) ? holds.filter(x => x !== t) : [...holds, t]; saveHolds(); renderWatch(); return; }
     if (add) { addWatch(add.dataset.add); renderWatch(); return; }
     if (pick) showModalTicker(pick.closest('li').dataset.t);
   });

@@ -305,7 +305,7 @@ body.modal-open { overflow: hidden; }
 .strat-row .sig-last { margin: 6px 0 2px; }
 .strat-name { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 13px; }
 .wl-only { flex-direction: row; align-items: center; gap: 6px; margin: 0 2px 6px; color: var(--sub); }
-.wl-list.only li:not([data-sig="buy"]):not([data-sig="sell"]) { display: none; }
+.wl-list.only li:not([data-sig="buy"]):not([data-sig="sell"]):not(.wl-sec) { display: none; }
 .modal-info { border-top: 1px solid var(--line); padding: 8px 16px; flex: none; }
 .modal-info[open] { max-height: 42vh; overflow-y: auto; }
 .modal-info > summary { font-weight: 600; padding: 4px 0; }
@@ -323,3 +323,11 @@ body.modal-open { overflow: hidden; }
   .add-panel { padding: 0; }
   .add-box { border-radius: 0; min-height: 100%; }
 }
+
+/* 보유 / 관심 구분 */
+.wl-form select { flex: none; width: auto; padding: 7px 4px; font-size: 13px; }
+.wl-sec { gap: 4px; padding: 12px 4px 4px; font-size: 12px; font-weight: 700; color: var(--sub); border-top: 1px solid var(--line); margin-top: 6px; }
+.wl-sec:first-child { border-top: 0; margin-top: 0; padding-top: 4px; }
+.wl-kind { flex: none; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.wl-kind.hold { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
+.wl-kind:hover { color: var(--text); border-color: var(--sub); }
