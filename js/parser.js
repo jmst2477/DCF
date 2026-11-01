@@ -2,6 +2,8 @@
 // 화면 예: "FY 2027  614.82B  23.32%  ...  590.10B  640.00B  38"
 //          "Jan 2028  1.92B  28.86% ..."  (회계연도 말 월 표기)
 // 매출 값은 B/M/K/T 단위가 붙은 숫자, EPS는 단위가 없으므로 자연스럽게 걸러진다.
+// 한국어 화면: "2026년 12월  499.57B ... 1.01톤"(T를 '톤'으로 번역). OCR(영어 글꼴)이 '년·월'을 "20304 128"처럼,
+// '톤'을 8이나 E로 읽는 경우가 많아 줄 맨 앞 연도 + 월 숫자만으로 기간을 알아보고, 단위는 앞뒤 연도 크기로 바로잡는다.
 (function (root) {
   'use strict';
 
@@ -14,12 +16,18 @@
   );
   const MONEY_RE = /(-?\$?\s?\d{1,3}(?:[,.]\d{3})*(?:\.\d+)?|\$?\d+(?:\.\d+)?)\s?([KMBT])\b/g;
   const UNIT = { K: 0.001, M: 1, B: 1000, T: 1000000 }; // → 백만 달러
+  // 한국어 화면 기간: 줄 맨 앞 "2026년 12월" (OCR 오독 예: "20264 12", "2027'd 128", "2028 128")
+  const KO_ROW_RE = /^(20\d{2})(?:\S{0,3}\s+|년\s*)(1[0-2]|[1-9])\S{0,2}(?=\s|$)/;
 
   // OCR이 자주 틀리는 글자 보정 (숫자 사이의 O→0, l/I→1, S→5 등)
   function clean(text) {
     return text
       .replace(/(?<=\d)[oO](?=[\d.,KMBT%])|(?<=[\s$])[oO](?=[.,]\d)/g, '0')
       .replace(/(?<=\d)[lI|](?=\d)/g, '1')
+      .replace(/(\d)\s?[톤조](?=\s|$)/gm, '$1T') // 한국어 화면의 '톤'(=T), '조'
+      .replace(/(\d\.\d{2})E(?=\s|$)/gm, '$1T') // '톤'을 E로 읽은 것
+      // 소수점을 놓친 금액: "49957B"·"111E" → "499.57B"·"1.11T" (시킹알파는 늘 소수 둘째 자리까지)
+      .replace(/(?<=[ \t])(\d{1,3})(\d{2})([BT8E])(?=\s|$)/gm, (m, a, b, u) => /^20\d8$/.test(m) ? m : `${a}.${b}${u === 'E' ? 'T' : u === '8' ? 'B' : u}`) // 2028 같은 연도는 그대로
       .replace(/(?<=\d),(?=\d{1,2}[KMBT]\b)/g, '.') // "614,82B" → "614.82B"
       // 시킹알파는 소수 둘째 자리 + 단위로 표시 → "614.828"은 B를 8로 잘못 읽은 것
       .replace(/(\d\.\d{2})8(?=\s|$)/gm, '$1B')
@@ -35,12 +43,15 @@
     const out = [];
     PERIOD_RE.lastIndex = 0;
     let m;
+    const ko = KO_ROW_RE.exec(line);
+    if (ko) out.push({ year: +ko[1], month: +ko[2], label: `${ko[1]}년 ${ko[2]}월`, index: 0, end: ko[0].length, ko: true });
     while ((m = PERIOD_RE.exec(line))) {
       let year, month = null;
       if (m[1]) year = toYear(m[1]);
       else if (m[2]) { year = toYear(m[3]); month = m[2].slice(0, 3).toLowerCase(); }
       else { year = toYear(m[5]); month = parseInt(m[4], 10); }
       if (year < 2000 || year > 2100) continue;
+      if (ko && m.index < out[0].end) continue; // 한국어 기간과 겹치는 부분
       out.push({ year, month, label: m[0].trim(), index: m.index, end: m.index + m[0].length });
     }
     return out;
@@ -92,6 +103,7 @@
         const col = parseColumns(sec.lines);
         if (col.length > found.length) found = col;
       }
+      fixKoYears(found);
       // 같은 연도가 여러 번 나오면 분기 화면일 가능성
       const byYear = new Map();
       let dup = false;
@@ -100,7 +112,9 @@
         byYear.set(r.year, Object.assign({ metric: sec.metric }, r));
       }
       if (dup) warnings.push(`${METRIC_KO[sec.metric]}: 같은 연도가 여러 번 나왔습니다. Quarterly(분기)가 아니라 Annual(연간) 화면인지 확인하세요. 연도별 첫 값만 사용했습니다.`);
-      out.push(...[...byYear.values()].sort((a, b) => a.year - b.year));
+      const rows = [...byYear.values()].sort((a, b) => a.year - b.year);
+      if (sec.metric !== 'eps') fixUnits(rows);
+      out.push(...rows);
     }
     if (!hint && out.length && !out.some(e => e.metric === 'revenue') && out.every(e => e.metric === 'eps')) {
       warnings.push('EPS만 읽었습니다. 같은 화면의 매출(Revenue) 표도 함께 캡처하면 EPS로 연도별 이익률을 추정합니다.');
@@ -111,6 +125,30 @@
         : '추정치를 찾지 못했습니다. 표가 잘 보이게 다시 캡처하거나 값을 직접 입력하세요.');
     }
     return { estimates: out, warnings, lines: all };
+  }
+
+  // 한국어 표는 위에서부터 한 해씩 늘어남 → OCR이 연도 숫자를 잘못 읽은 줄(2029→2020, 2032→2052)은 순서로 바로잡음
+  function fixKoYears(rows) {
+    const ko = rows.filter(r => r.ko);
+    ko.forEach((r, i) => {
+      const prev = ko[i - 1] && ko[i - 1].year, next = ko[i + 1] && ko[i + 1].year;
+      let y = r.year;
+      if (prev && next && next - prev === 2) y = prev + 1; // 앞뒤 해 사이 한 칸
+      else if (prev && !next && (y <= prev || y > prev + 5)) y = prev + 1; // 마지막 줄
+      else if (!prev && next && ko[i + 2] && ko[i + 2].year === next + 1 && (y >= next || y < next - 5)) y = next - 1; // 첫 줄
+      if (y !== r.year) { r.year = y; r.label = `${y}년`; }
+    });
+  }
+
+  // 'T'(조 달러)를 OCR이 B(8)로 읽으면 다음 해 값이 1000분의 1로 뚝 떨어짐 → 앞뒤 해와 비교해 바로잡음.
+  // 매출·이익이 한 해에 50배 넘게 변하는 일은 없다고 봄
+  function fixUnits(rows) {
+    for (let i = 1; i < rows.length; i++) {
+      const a = rows[i - 1], b = rows[i];
+      if (a.value > 0 && b.value > 0 && b.value < a.value / 50 && b.value * 1000 < a.value * 50) {
+        b.value *= 1000; b.raw += ' (조 단위로 보정)';
+      }
+    }
   }
 
   // 표 제목 줄로 구간을 나눔. 제목이 하나도 없으면 전체를 hint 표(없으면 매출 표)로 봄
@@ -150,7 +188,10 @@
       const p = periods[0];
       const money = findMoney(line).filter(x => x.index >= p.end);
       if (!money.length) continue;
-      out.push({ year: p.year, label: p.label, value: money[0].value, raw: money[0].raw, source: 'row' });
+      // 첫 숫자가 단위를 못 읽은 추정치면 뒤 칸(하단·상단 추정치) 값을 대신 잡지 않도록 건너뜀
+      const first = /-?\$?\d/.exec(line.slice(p.end));
+      if (first && p.end + first.index < money[0].index - 1) continue;
+      out.push({ year: p.year, label: p.label, value: money[0].value, raw: money[0].raw, source: 'row', ko: p.ko });
     }
     return out;
   }
@@ -161,9 +202,13 @@
     for (const line of lines) {
       const periods = findPeriods(line);
       if (periods.length !== 1) continue;
-      const m = /^\s*\$?(-?\d{1,4}\.\d{1,3})(?![\d%])/.exec(line.slice(periods[0].end));
-      if (!m) continue;
-      out.push({ year: periods[0].year, label: periods[0].label, value: parseFloat(m[1]), raw: m[1], source: 'row' });
+      const rest = line.slice(periods[0].end);
+      const m = /^\s*\$?(-?\d{1,4}\.\d{1,3})(?![\d%])/.exec(rest);
+      // 소수점을 놓친 값("2412" = 24.12)은 성장률(%)이 뒤따를 때만 둘째 자리 소수로 봄
+      const n = !m && periods[0].ko && /^\s*(-?\d{3,5})\s+-?\d+(?:\.\d+)?%/.exec(rest);
+      if (!m && !n) continue;
+      const v = m ? parseFloat(m[1]) : parseInt(n[1], 10) / 100;
+      out.push({ year: periods[0].year, label: periods[0].label, value: v, raw: m ? m[1] : n[1], source: 'row', ko: periods[0].ko });
     }
     return out;
   }
