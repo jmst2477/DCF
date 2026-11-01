@@ -194,7 +194,7 @@ ol.guide li { margin: 4px 0; }
 body.modal-open { overflow: hidden; }
 .modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.55); display: flex; padding: 16px; }
 .modal-box { flex: 1; display: flex; background: var(--card); border-radius: 16px; overflow: hidden; min-width: 0; }
-.wl { width: 340px; flex: none; border-right: 1px solid var(--line); padding: 14px 12px; overflow-y: auto; overflow-x: hidden; }
+.wl { width: 340px; flex: none; padding: 14px 12px; overflow-y: auto; overflow-x: hidden; }
 .wl-form { display: flex; gap: 6px; }
 .wl-form input { flex: 1; min-width: 0; text-transform: uppercase; padding: 7px 10px; }
 .wl-title { margin: 12px 2px 6px; }
@@ -227,7 +227,9 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 760px) {
   .modal { padding: 0; }
   .modal-box { border-radius: 0; flex-direction: column; }
-  .wl { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 34vh; padding: 10px; }
+  .wl { width: auto !important; border-right: 0; border-bottom: 0; max-height: 34vh; padding: 10px; }
+  .wl-resize { width: auto; height: 12px; cursor: row-resize; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .wl-resize::after { width: 36px; height: 4px; }
 }
 /* 매수 신호 */
 .sig-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -342,3 +344,8 @@ body.modal-open { overflow: hidden; }
 .wl-theme { font-size: 10.5px; font-weight: 600; color: var(--accent); background: var(--accent-weak); border-radius: 6px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; cursor: pointer; }
 .wl-theme.none { color: var(--muted); background: transparent; border: 1px dashed var(--line); font-weight: 500; }
 .wl-theme:hover { color: var(--text); }
+/* 목록 칸 넓이 조절 손잡이 (휴대폰에선 높이) */
+.wl-resize { flex: none; width: 8px; cursor: col-resize; touch-action: none; user-select: none; background: var(--card); border-left: 1px solid var(--line); display: flex; align-items: center; justify-content: center; }
+.wl-resize::after { content: ''; width: 3px; height: 36px; border-radius: 3px; background: var(--line); }
+.wl-resize:hover::after, .wl-resize.on::after { background: var(--accent); }
+body.wl-resizing { user-select: none; cursor: col-resize; }
