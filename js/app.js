@@ -60,37 +60,62 @@
       if (h && h.length > 1 && h[h.length - 2].revenue > 0) set('growth', h[h.length - 1].revenue / h[h.length - 2].revenue - 1, '최근 실적 성장률');
     }
     // 이익률·감가상각비·캐펙스: 시킹알파 추정치(EBIT/EPS 등)가 있으면 그 평균, 없으면 최근 실적
+    // 한 해만 튀는 EPS(일회성 투자이익 등)로 추정한 이익률은 평균에서 뺌. 그 해밖에 없으면 그대로 씀
+    const spikes = epsSpikes(s);
     const avgSrc = key => {
-      const v = [], kinds = new Set();
-      for (let t = 1; t <= H; t++) { const k = s.src && s.src[key] && s.src[key][t]; if (k === 'est' || k === 'eps') { v.push(s[key][t]); kinds.add(k); } }
-      return v.length ? { v: v.reduce((a, c) => a + c, 0) / v.length, label: kinds.has('est') ? '시킹알파 추정치 평균' : 'EPS로 추정 (평균)' } : null;
+      const v = [], kinds = new Set(), skipped = [];
+      for (let t = 1; t <= H; t++) {
+        const k = s.src && s.src[key] && s.src[key][t];
+        if (k === 'eps' && spikes.has(s.baseFY + t)) { skipped.push(s.baseFY + t); continue; }
+        if (k === 'est' || k === 'eps') { v.push(s[key][t]); kinds.add(k); }
+      }
+      if (!v.length && skipped.length) { for (const y of skipped) v.push(s[key][y - s.baseFY]); kinds.add('eps'); skipped.length = 0; }
+      const skip = skipped.length ? `, ${skipped.join('·')}년 일회성 EPS 제외` : '';
+      return v.length ? { v: v.reduce((a, c) => a + c, 0) / v.length, label: kinds.has('est') ? '시킹알파 추정치 평균' : `EPS로 추정 (평균${skip})` } : null;
     };
     const fromEps = {};
     for (const key of ['margin', 'da', 'capex']) {
       const e = avgSrc(key);
       fromEps[key] = !!e && e.label.startsWith('EPS');
       if (e) set(key, e.v, e.label);
-      else set(key, s[key][0], '최근 실적');
+      else set(key, s[key][0], key === 'capex' && s.capexAvgN > 1 ? `최근 ${s.capexAvgN}년 평균` : '최근 실적');
     }
     // 시킹알파 EPS는 조정(Non-GAAP) EPS라 주식보상비용(SBC)과 인수 무형자산 상각비가 빠져 있음.
     // 그대로 쓰면 이익률이 높아지고, 감가상각비(상각비 포함)를 또 더해 현금흐름이 두 번 부풀려짐 (예: 브로드컴).
     if (fromEps.margin) {
       const sbc = s.sbc > 0 ? s.sbc : 0;
-      if (sbc) set('margin', b.margin - sbc, `EPS로 추정 − 주식보상 ${(sbc * 100).toFixed(1)}%`);
+      if (sbc) set('margin', b.margin - sbc, `${b.src.margin} − 주식보상 ${(sbc * 100).toFixed(1)}%`);
       if (b.src.da !== 'user' && !(avgSrc('da') || {}).v && b.da > b.capex) set('da', b.capex, '캐펙스와 같게 (조정 EPS는 상각비를 이미 뺌)');
     }
     for (const [k, v] of [['tax', 0.21], ['nwc', 0.01]]) if (!b.src[k]) { b[k] = v; b.src[k] = '강의 기본값'; }
     // 적정 P/E: EPS 추정치가 2개 이상이면 PEG 1.5 × EPS 연평균 성장률(%) (10~40배), 없으면 20배
     const eg = epsGrowth(s);
-    if (eg != null) set('pe', Math.max(10, Math.min(40, 1.5 * eg * 100)), `PEG 1.5 × EPS 성장률 ${(eg * 100).toFixed(1)}%`);
+    const sp = [...spikes].filter(y => y <= s.baseFY + 3);
+    if (eg != null) set('pe', Math.max(10, Math.min(40, 1.5 * eg * 100)), `PEG 1.5 × EPS 성장률 ${(eg * 100).toFixed(1)}%${sp.length ? ` (${sp.join('·')}년 일회성 EPS 제외)` : ''}`);
     else if (!b.src.pe) { b.pe = 20; b.src.pe = '시장 평균 수준 20배'; }
     if (!b.src.years || b.src.years === '강의 기본값') { b.years = MAX_YEARS; b.src.years = '기본 3년'; }
     return s;
   }
   // ---------- P/E 방식: 적정가 = 예상 EPS × 적정 P/E ----------
   // 지금 = 1년차 EPS, 내년 = 2년차, 내후년 = 3년차. 시킹알파 EPS 추정치가 없으면 계산값(매출 × 이익률 × (1 − 세율) ÷ 주식수).
+  // 한 해만 튀는 EPS: 다음 해 추정치가 10% 넘게 떨어지는 해 (예: GOOG 2026년 19.70 → 2027년 14.81).
+  // 지분 평가이익 같은 일회성 이익이 섞인 것으로 보고 이익률 평균과 P/E 계산에서 뺀다.
+  function epsSpikes(s) {
+    const raw = s.estRaw && s.estRaw.eps, out = new Set();
+    if (!raw) return out;
+    for (let t = 1; t <= 5; t++) {
+      const y = s.baseFY + t;
+      if (raw[y] > 0 && raw[y + 1] > 0 && raw[y + 1] < raw[y] * 0.9) out.add(y);
+    }
+    return out;
+  }
   function epsAt(s, t) {
     const raw = s.estRaw && s.estRaw.eps, y = s.baseFY + t;
+    if (raw && raw[y] > 0 && epsSpikes(s).has(y)) {
+      // 튀는 해는 다음 해 EPS를 EPS 성장률만큼 되돌려 씀
+      const eg = epsGrowth(s);
+      if (raw[y + 1] > 0 && eg != null && eg > -1) return { v: raw[y + 1] / (1 + eg), est: true, adj: raw[y] };
+    }
     if (raw && raw[y] > 0) return { v: raw[y], est: true };
     const b = s.basic;
     if (!(b && b.rev0 > 0 && s.shares > 0)) return { v: NaN, est: false };
@@ -99,7 +124,8 @@
   function epsGrowth(s) {
     const raw = s.estRaw && s.estRaw.eps;
     if (!raw) return null;
-    const ys = [1, 2, 3].map(t => s.baseFY + t).filter(y => raw[y] > 0);
+    const sp = epsSpikes(s);
+    const ys = [1, 2, 3, 4, 5].map(t => s.baseFY + t).filter(y => raw[y] > 0 && !sp.has(y)).slice(0, 3);
     if (ys.length < 2) return null;
     const a = ys[0], z = ys[ys.length - 1];
     return Math.pow(raw[z] / raw[a], 1 / (z - a)) - 1;
@@ -172,7 +198,10 @@
     const margin = last.ebitMargin != null ? last.ebitMargin : avg(h.map(x => x.ebitMargin)) || 0.1;
     s.margin = Array(N + 1).fill(margin);
     s.da = Array(N + 1).fill(last.daPct || 0);
-    s.capex = Array(N + 1).fill(last.capexPct || 0);
+    // 캐펙스는 한 해 투자 붐(예: AI 데이터센터)이 영원히 이어진다고 보지 않도록 최근 3년 평균
+    const cx = h.slice(-3).map(x => x.capexPct).filter(v => v != null && Number.isFinite(v));
+    s.capexAvgN = cx.length;
+    s.capex = Array(N + 1).fill(+(cx.length ? cx.reduce((a, c) => a + c, 0) / cx.length : last.capexPct || 0).toFixed(4));
     // 금융 자회사 채권(예: CAT 파이낸셜)이 매출채권에 섞이면 비율이 비정상적으로 커지므로 20%로 제한
     const NWC_CAP = 0.2;
     const nwcRaw = last.nwcPct != null ? last.nwcPct : 0;
@@ -547,7 +576,7 @@
     const calc = es.some(e => !e.est);
     return `<div class="fv-title">P/E 방식 <span class="muted">예상 EPS × ${(+pe).toFixed(1)}배${calc ? ' · † EPS 추정치가 없어 계산값 사용' : ''}</span></div>
       <div class="fv-row">${es.map((e, k) => `
-        <div class="fv pe"><div class="k">${LABEL[k]}${e.est ? '' : ' †'} <span class="muted">EPS $${fmt(e.v, 2)}</span></div>
+        <div class="fv pe"><div class="k">${LABEL[k]}${e.est ? '' : ' †'} <span class="muted">EPS $${fmt(e.v, 2)}${e.adj ? ` (추정치 $${fmt(e.adj, 2)}는 일회성으로 보고 보정)` : ''}</span></div>
           <div class="v">${money(e.v * pe)}</div>${chg(e.v * pe)}</div>`).join('')}
       </div>`;
   }
