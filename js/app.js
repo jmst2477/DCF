@@ -303,8 +303,12 @@
   // ---------- 매매 신호·차트 지표 (js/strategy.js 의 STRATEGIES, CHART_INDICATORS + "＋ 추가"로 넣은 것) ----------
   const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
-  const STRATS = (window.STRATEGIES || []).slice();
-  const INDS = (window.CHART_INDICATORS || []).slice();
+  // 사이트에 기본으로 들어 있는 신호·지표 중 '－ 삭제'로 지운 것 (이 브라우저에 저장, 되살리기 가능)
+  const HIDDEN_KEY = 'dcf-hidden-items';
+  let hiddenIds = (() => { try { const v = JSON.parse(localStorage.getItem(HIDDEN_KEY)); return Array.isArray(v) ? v : []; } catch (e) { return []; } })();
+  const BUILTIN_STRATS = (window.STRATEGIES || []).slice(), BUILTIN_INDS = (window.CHART_INDICATORS || []).slice();
+  const STRATS = BUILTIN_STRATS.filter(x => !hiddenIds.includes(x.id));
+  const INDS = BUILTIN_INDS.filter(x => !hiddenIds.includes(x.id));
 
   // 성적 계산 설정: 기간(최근 몇 년), 손절·익절 % (비우면 안 씀). 모든 신호에 똑같이 적용
   const BT_KEY = 'dcf-backtest';
@@ -440,11 +444,11 @@
       box.innerHTML = STRATS.map(s => {
         const st = pickRates[s.id];
         return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
-      }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button>';
+      }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">－ 삭제</button>';
     });
     $$('.ind-pick').forEach(box => {
       box.innerHTML = INDS.map(i => `<button type="button" class="chip ${indOff.includes(i.id) ? '' : 'on'}" data-iid="${esc(i.id)}" style="--c:${i.color || '#787B86'}"><i></i>${esc(i.name)}</button>`).join('') +
-        '<button type="button" class="chip add" data-add-kind="indicator">＋ 지표 추가</button>';
+        '<button type="button" class="chip add" data-add-kind="indicator">＋ 지표 추가</button><button type="button" class="chip del" data-del-kind="indicator">－ 삭제</button>';
     });
     syncAbout();
   }
@@ -472,6 +476,8 @@
   document.addEventListener('click', e => {
     const b = e.target.closest('.strat-pick .chip[data-sid]'), ib = e.target.closest('.ind-pick .chip[data-iid]'), add = e.target.closest('.chip.add');
     if (add) { openAdd(add.dataset.addKind); return; }
+    const del = e.target.closest('.chip.del');
+    if (del) { openDel(del.dataset.delKind); return; }
     if (e.target.closest('.chip[data-about]')) {
       // 한 번 누르면 열고, 다시 누르면 닫아 차트를 크게 돌려놓는다
       const info = $('#modal-info');
@@ -1470,8 +1476,8 @@
       : { id: it.id, name: it.name, color: it.color, desc: it.desc, custom: true, plot: d => c.plot(d) };
   }
   function mountCustoms() {
-    for (let i = STRATS.length - 1; i >= 0; i--) if (STRATS[i].custom) STRATS.splice(i, 1);
-    for (let i = INDS.length - 1; i >= 0; i--) if (INDS[i].custom) INDS.splice(i, 1);
+    STRATS.splice(0, STRATS.length, ...BUILTIN_STRATS.filter(x => !hiddenIds.includes(x.id)));
+    INDS.splice(0, INDS.length, ...BUILTIN_INDS.filter(x => !hiddenIds.includes(x.id)));
     customs.forEach(it => {
       try { (it.kind === 'strategy' ? STRATS : INDS).push(toItem(it)); } catch (e) { console.warn('추가한 항목을 읽지 못했습니다', it.name, e); }
     });
@@ -1556,18 +1562,62 @@
     renderWatch();
     if (modalTicker) showModalTicker(modalTicker);
   });
-  $('#add-list').addEventListener('click', e => {
-    const b = e.target.closest('[data-del-custom]');
-    if (!b) return;
-    const it = customs.find(x => x.id === b.dataset.delCustom);
-    if (!it || !confirm(`'${it.name}'을(를) 지울까요?`)) return;
-    customs = customs.filter(x => x.id !== it.id);
-    lsSet(CUSTOM_KEY, customs);
+  // ---------- "－ 삭제": 신호·지표 지우기 ----------
+  // 내가 추가한 것은 완전히 지우고, 사이트 기본 신호·지표는 숨겨 둔다 (아래 '지운 기본 항목'에서 되살리기)
+  let delKind = 'strategy';
+  function afterItemsChanged() {
     mountCustoms();
     renderCustomList();
+    renderDelList();
     renderPickers();
     renderWatch();
     if (modalTicker) showModalTicker(modalTicker);
+  }
+  function deleteItem(id) {
+    const custom = customs.find(x => x.id === id);
+    const builtin = BUILTIN_STRATS.concat(BUILTIN_INDS).find(x => x.id === id);
+    const it = custom || builtin;
+    if (!it) return;
+    if (BUILTIN_STRATS.some(x => x.id === id) || (custom && custom.kind === 'strategy')) {
+      if (STRATS.length <= 1) { alert('매매 신호는 하나 이상 남아 있어야 합니다.'); return; }
+    }
+    if (!confirm(`'${it.name}'을(를) 지울까요?${custom ? '' : '\n(사이트 기본 항목이라 나중에 되살릴 수 있습니다)'}`)) return;
+    if (custom) { customs = customs.filter(x => x.id !== id); lsSet(CUSTOM_KEY, customs); }
+    else { hiddenIds = hiddenIds.concat(id); lsSet(HIDDEN_KEY, hiddenIds); }
+    afterItemsChanged();
+  }
+  function restoreItem(id) {
+    hiddenIds = hiddenIds.filter(x => x !== id);
+    lsSet(HIDDEN_KEY, hiddenIds);
+    afterItemsChanged();
+  }
+  function renderDelList() {
+    if ($('#del-panel').hidden) return;
+    const strat = delKind === 'strategy';
+    const list = strat ? STRATS : INDS, base = strat ? BUILTIN_STRATS : BUILTIN_INDS;
+    $('#del-title').textContent = strat ? '매매 신호 삭제' : '차트 지표 삭제';
+    $('#del-list').innerHTML = list.length
+      ? list.map(it => `<li><span class="strat-name" style="--c:${it.color || '#787B86'}"><i></i><b>${esc(it.name)}</b></span> <span class="muted small">${it.custom ? '내가 추가' : '사이트 기본'}</span> <button type="button" class="ghost mini danger" data-del-id="${esc(it.id)}">삭제</button></li>`).join('')
+      : '<li class="muted small">없습니다.</li>';
+    const gone = base.filter(x => hiddenIds.includes(x.id));
+    $('#del-hidden-wrap').hidden = !gone.length;
+    $('#del-hidden').innerHTML = gone.map(it => `<li><span class="strat-name" style="--c:${it.color || '#787B86'}"><i></i><b>${esc(it.name)}</b></span> <button type="button" class="ghost mini" data-restore-id="${esc(it.id)}">되살리기</button></li>`).join('');
+  }
+  function openDel(kind) {
+    delKind = kind === 'indicator' ? 'indicator' : 'strategy';
+    $('#del-panel').hidden = false;
+    renderDelList();
+  }
+  $('#del-close').addEventListener('click', () => { $('#del-panel').hidden = true; });
+  $('#del-panel').addEventListener('click', e => {
+    if (e.target === $('#del-panel')) { $('#del-panel').hidden = true; return; }
+    const d = e.target.closest('[data-del-id]'), r = e.target.closest('[data-restore-id]');
+    if (d) deleteItem(d.dataset.delId);
+    else if (r) restoreItem(r.dataset.restoreId);
+  });
+  $('#add-list').addEventListener('click', e => {
+    const b = e.target.closest('[data-del-custom]');
+    if (b) deleteItem(b.dataset.delCustom);
   });
 
   syncMode();

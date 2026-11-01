@@ -269,6 +269,9 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 760px) { .sig-about dl { grid-template-columns: 1fr; gap: 2px; } .sig-about dd { margin-bottom: 8px; } }
 .chip.add { border-style: dashed; color: var(--accent); background: transparent; }
 .chip.add:hover { border-color: var(--accent); }
+.chip.del { border-style: dashed; color: var(--muted); background: transparent; }
+.chip.del:hover { border-color: var(--up); color: var(--up); }
+.ghost.danger { color: var(--up); }
 /* 관심종목 승률 */
 .wl-left { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wl-rate { font-size: 11px; color: var(--muted); font-weight: 500; white-space: nowrap; }
