@@ -166,6 +166,18 @@
         <p class="hint">일봉 종가 기준으로 사이트에서 직접 계산합니다 (야후 주가). 장이 열려 있는 동안은 오늘 봉이 아직 끝나지 않아 신호가 바뀔 수 있습니다. 장전·장후 가격은 주황 점선으로만 보여 주고 신호 계산에는 넣지 않습니다. 투자 판단은 본인 책임입니다.</p>
       </details>
     </section>
+    <!-- － 삭제: 신호·지표 지우기 -->
+    <div id="del-panel" class="add-panel" hidden>
+      <div class="add-box" role="dialog" aria-labelledby="del-title">
+        <div class="add-head"><b id="del-title">매매 신호 삭제</b><button type="button" id="del-close" class="ghost mini">닫기 ✕</button></div>
+        <p class="muted small">지울 항목의 '삭제'를 누르세요. 내가 추가한 것은 완전히 지워지고, 사이트 기본 항목은 아래에서 다시 되살릴 수 있습니다. 이 브라우저에만 적용됩니다.</p>
+        <ul id="del-list" class="add-list"></ul>
+        <div id="del-hidden-wrap" hidden>
+          <h4 class="add-sub">지운 기본 항목</h4>
+          <ul id="del-hidden" class="add-list"></ul>
+        </div>
+      </div>
+    </div>
     <!-- ＋ 신호 추가 / ＋ 지표 추가 -->
     <div id="add-panel" class="add-panel" hidden>
       <div class="add-box" role="dialog" aria-label="신호·지표 추가">
