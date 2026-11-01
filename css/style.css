@@ -194,7 +194,7 @@ ol.guide li { margin: 4px 0; }
 body.modal-open { overflow: hidden; }
 .modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.55); display: flex; padding: 16px; }
 .modal-box { flex: 1; display: flex; background: var(--card); border-radius: 16px; overflow: hidden; min-width: 0; }
-.wl { width: 256px; flex: none; border-right: 1px solid var(--line); padding: 14px 12px; overflow-y: auto; }
+.wl { width: 340px; flex: none; border-right: 1px solid var(--line); padding: 14px 12px; overflow-y: auto; overflow-x: hidden; }
 .wl-form { display: flex; gap: 6px; }
 .wl-form input { flex: 1; min-width: 0; text-transform: uppercase; padding: 7px 10px; }
 .wl-title { margin: 12px 2px 6px; }
@@ -202,9 +202,9 @@ body.modal-open { overflow: hidden; }
 .wl-list li { display: flex; align-items: center; border-radius: 10px; }
 .wl-list li.on { background: var(--accent-weak); }
 .wl-list li.wl-empty { padding: 8px 4px; }
-.wl-pick { flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 6px; background: transparent; color: var(--text); padding: 9px 8px; font-weight: 500; text-align: left; }
+.wl-pick { flex: 1; min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: 6px; background: transparent; color: var(--text); padding: 9px 8px; font-weight: 500; text-align: left; }
 .wl-pick:hover { background: var(--soft); }
-.wl-val { font-size: 13px; white-space: nowrap; }
+.wl-val { font-size: 13px; white-space: nowrap; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 3px 4px; min-width: 0; }
 .wl-del, .wl-add { background: transparent; color: var(--muted); padding: 6px 5px; font-size: 13px; }
 .wl-del:hover, .wl-add:hover { background: var(--soft); color: var(--text); }
 .sig-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; color: #fff; background: var(--muted); }
@@ -227,7 +227,7 @@ body.modal-open { overflow: hidden; }
 @media (max-width: 760px) {
   .modal { padding: 0; }
   .modal-box { border-radius: 0; flex-direction: column; }
-  .wl { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 26vh; padding: 10px; }
+  .wl { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 34vh; padding: 10px; }
 }
 /* 매수 신호 */
 .sig-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -339,6 +339,6 @@ body.modal-open { overflow: hidden; }
 .wl-themes { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 2px 8px; }
 .wl-themes .chip { --c: var(--accent); padding: 3px 9px; font-size: 12px; gap: 4px; }
 .wl-name { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.wl-theme { font-size: 10.5px; font-weight: 600; color: var(--accent); background: var(--accent-weak); border-radius: 6px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70px; cursor: pointer; }
+.wl-theme { font-size: 10.5px; font-weight: 600; color: var(--accent); background: var(--accent-weak); border-radius: 6px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; cursor: pointer; }
 .wl-theme.none { color: var(--muted); background: transparent; border: 1px dashed var(--line); font-weight: 500; }
 .wl-theme:hover { color: var(--text); }
