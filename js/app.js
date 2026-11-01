@@ -1345,6 +1345,49 @@
     if (pick) showModalTicker(pick.closest('li').dataset.t);
   });
 
+  // 목록 칸 넓이 조절: 오른쪽 경계(휴대폰은 아래 경계)를 끌면 바뀌고, 두 번 누르면 처음 크기로. 이 브라우저에 저장.
+  const WL_SIZE_KEY = 'dcf-wl-size';
+  const narrow = () => matchMedia('(max-width: 760px)').matches;
+  function applyWlSize() {
+    const sz = lsGet(WL_SIZE_KEY, {}) || {}, wl = $('.wl');
+    wl.style.width = !narrow() && sz.w ? sz.w + 'px' : '';
+    wl.style.maxHeight = narrow() && sz.h ? sz.h + 'px' : '';
+    wl.style.height = narrow() && sz.h ? sz.h + 'px' : '';
+  }
+  applyWlSize();
+  window.addEventListener('resize', applyWlSize);
+  let rs = null;
+  $('#wl-resize').addEventListener('pointerdown', e => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    const wl = $('.wl'), r = wl.getBoundingClientRect();
+    rs = { id: e.pointerId, x: e.clientX, y: e.clientY, w: r.width, h: r.height, v: narrow() };
+    $('#wl-resize').classList.add('on');
+    document.body.classList.add('wl-resizing');
+  });
+  document.addEventListener('pointermove', e => {
+    if (!rs || e.pointerId !== rs.id) return;
+    const box = $('.modal-box').getBoundingClientRect(), sz = lsGet(WL_SIZE_KEY, {}) || {};
+    if (rs.v) sz.h = Math.round(Math.max(80, Math.min(box.height * 0.75, rs.h + e.clientY - rs.y)));
+    else sz.w = Math.round(Math.max(220, Math.min(box.width - 420, rs.w + e.clientX - rs.x)));
+    lsSet(WL_SIZE_KEY, sz);
+    applyWlSize();
+  });
+  const endResize = e => {
+    if (!rs || e.pointerId !== rs.id) return;
+    rs = null;
+    $('#wl-resize').classList.remove('on');
+    document.body.classList.remove('wl-resizing');
+  };
+  document.addEventListener('pointerup', endResize);
+  document.addEventListener('pointercancel', endResize);
+  $('#wl-resize').addEventListener('dblclick', () => {
+    const sz = lsGet(WL_SIZE_KEY, {}) || {};
+    delete sz[narrow() ? 'h' : 'w'];
+    lsSet(WL_SIZE_KEY, sz);
+    applyWlSize();
+  });
+
   // 손잡이(⋮⋮)를 끌어 순서 바꾸기 · 보유/관심 칸 옮기기 (마우스·터치 모두)
   let drag = null;
   $('#wl-list').addEventListener('pointerdown', e => {
