@@ -303,12 +303,14 @@
   // ---------- 매매 신호·차트 지표 (js/strategy.js 의 STRATEGIES, CHART_INDICATORS + "＋ 추가"로 넣은 것) ----------
   const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
-  // 사이트에 기본으로 들어 있는 신호·지표 중 '－ 삭제'로 지운 것 (이 브라우저에 저장, 되살리기 가능)
-  const HIDDEN_KEY = 'dcf-hidden-items';
-  let hiddenIds = (() => { try { const v = JSON.parse(localStorage.getItem(HIDDEN_KEY)); return Array.isArray(v) ? v : []; } catch (e) { return []; } })();
+  // '가리기·삭제' (이 브라우저에 저장): 가린 것은 '다시 보이기'로 돌릴 수 있고, 삭제한 사이트 기본 항목은 다시 나오지 않음
+  const HIDDEN_KEY = 'dcf-hidden-items', DELETED_KEY = 'dcf-deleted-items';
+  const lsArr = k => { try { const v = JSON.parse(localStorage.getItem(k)); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+  let hiddenIds = lsArr(HIDDEN_KEY), deletedIds = lsArr(DELETED_KEY);
+  const offIds = () => hiddenIds.concat(deletedIds);
   const BUILTIN_STRATS = (window.STRATEGIES || []).slice(), BUILTIN_INDS = (window.CHART_INDICATORS || []).slice();
-  const STRATS = BUILTIN_STRATS.filter(x => !hiddenIds.includes(x.id));
-  const INDS = BUILTIN_INDS.filter(x => !hiddenIds.includes(x.id));
+  const STRATS = BUILTIN_STRATS.filter(x => !offIds().includes(x.id));
+  const INDS = BUILTIN_INDS.filter(x => !offIds().includes(x.id));
 
   // 성적 계산 설정: 기간(최근 몇 년), 손절·익절 % (비우면 안 씀). 모든 신호에 똑같이 적용
   const BT_KEY = 'dcf-backtest';
@@ -444,11 +446,11 @@
       box.innerHTML = STRATS.map(s => {
         const st = pickRates[s.id];
         return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
-      }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">－ 삭제</button>';
+      }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">가리기·삭제</button>';
     });
     $$('.ind-pick').forEach(box => {
       box.innerHTML = INDS.map(i => `<button type="button" class="chip ${indOff.includes(i.id) ? '' : 'on'}" data-iid="${esc(i.id)}" style="--c:${i.color || '#787B86'}"><i></i>${esc(i.name)}</button>`).join('') +
-        '<button type="button" class="chip add" data-add-kind="indicator">＋ 지표 추가</button><button type="button" class="chip del" data-del-kind="indicator">－ 삭제</button>';
+        '<button type="button" class="chip add" data-add-kind="indicator">＋ 지표 추가</button><button type="button" class="chip del" data-del-kind="indicator">가리기·삭제</button>';
     });
     syncAbout();
   }
@@ -1284,6 +1286,8 @@
       if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
     }
   }
+  const GRP_KEY = 'dcf-wl-open';
+  let grpOpen = lsGet(GRP_KEY, []);
   function renderWatch() {
     const list = $('#wl-list');
     const cur = (state.ticker || '').trim().toUpperCase();
@@ -1298,9 +1302,19 @@
         ${saved ? `<button type="button" class="wl-kind ${h ? 'hold' : ''}" data-kind="${esc(t)}" title="${h ? '누르면 관심종목으로 옮깁니다' : '실제로 갖고 있으면 누르세요 (보유로 옮김)'}">${h ? '보유' : '관심'}</button><button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
       </li>`;
     };
-    const sec = (title, arr, empty, k) => `<li class="wl-sec" data-sec="${k}">${title} <span class="muted">${arr.length}</span></li>` + (arr.length ? arr.map(row).join('') : `<li class="muted small wl-empty">${empty}</li>`);
+    const sec = (title, arr, empty, k, body) => `<li class="wl-sec" data-sec="${k}">${title} <span class="muted">${arr.length}</span></li>` + (arr.length ? (body || arr.map(row).join('')) : `<li class="muted small wl-empty">${empty}</li>`);
+    // 관심 종목은 섹터(테마)별로 묶어 접어 둡니다. 묶음 제목을 누르면 펼침 (펼친 묶음은 이 브라우저에 기억)
+    const groups = [];
+    rest.forEach(t => { const g = themes[t] || '기타'; let x = groups.find(y => y.name === g); if (!x) groups.push(x = { name: g, ts: [] }); x.ts.push(t); });
+    const etc = groups.findIndex(g => g.name === '기타');
+    if (etc >= 0) groups.push(groups.splice(etc, 1)[0]);
+    const restBody = groups.map(g => {
+      const open = !!themePick || grpOpen.includes(g.name);
+      return `<li class="wl-grp${open ? ' open' : ''}" data-grp="${esc(g.name)}"><button type="button" class="wl-grp-btn" aria-expanded="${open}"><span class="wl-grp-arrow">${open ? '▾' : '▸'}</span><b>${esc(g.name)}</b><span class="muted">${g.ts.length}</span><span class="wl-grp-sig"></span></button></li>` +
+        g.ts.map(t => row(t).replace('<li class="', `<li data-g="${esc(g.name)}" class="${open ? '' : 'fold '}`)).join('');
+    }).join('');
     list.innerHTML = (cur && !watch.includes(cur) ? row(cur) : '') +
-      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르거나 여기로 끌어 오면 보유로 옮겨집니다.', 'hold') + sec('관심 종목', rest, themePick ? `'${esc(themePick)}' 테마의 관심 종목이 없습니다.` : '지켜볼 종목을 위에서 추가하세요.', 'watch')
+      (watch.length ? sec('보유 종목', held, '종목 옆 "관심"을 누르거나 여기로 끌어 오면 보유로 옮겨집니다.', 'hold') + sec('관심 종목', rest, themePick ? `'${esc(themePick)}' 테마의 관심 종목이 없습니다.` : '지켜볼 종목을 위에서 추가하세요.', 'watch', restBody)
         : '<li class="muted small wl-empty">관심종목이 없습니다. 위에 티커를 넣고 추가하세요.</li>');
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
@@ -1351,6 +1365,12 @@
   });
   // "오늘 매수·청산 신호 종목만": 해당 종목이 없으면 안내 문구
   function updateOnly() {
+    // 접힌 묶음 제목에 오늘 매수·청산 신호 수를 보여 줌
+    $$('#wl-list .wl-grp').forEach(gl => {
+      const rows = [...$$('#wl-list li[data-g]')].filter(x => x.dataset.g === gl.dataset.grp);
+      const nb = rows.filter(x => x.dataset.sig === 'buy').length, ns = rows.filter(x => x.dataset.sig === 'sell').length;
+      gl.querySelector('.wl-grp-sig').innerHTML = (nb ? `<span class="sig-pill buy">매수 ${nb}</span>` : '') + (ns ? `<span class="sig-pill sell">청산 ${ns}</span>` : '');
+    });
     const on = $('#wl-only').checked;
     $('#wl-list').classList.toggle('only', on);
     $('#wl-none').hidden = !on || !!$('#wl-list li[data-sig="buy"], #wl-list li[data-sig="sell"]');
@@ -1364,6 +1384,14 @@
     renderWatch();
   });
   $('#wl-list').addEventListener('click', e => {
+    const gb = e.target.closest('.wl-grp-btn');
+    if (gb) {
+      const g = gb.closest('li').dataset.grp;
+      grpOpen = grpOpen.includes(g) ? grpOpen.filter(x => x !== g) : [...grpOpen, g];
+      lsSet(GRP_KEY, grpOpen);
+      renderWatch();
+      return;
+    }
     const del = e.target.closest('[data-del]'), add = e.target.closest('[data-add]'), kind = e.target.closest('[data-kind]'), pick = e.target.closest('.wl-pick');
     const th = e.target.closest('[data-theme-t]');
     if (th) {
@@ -1476,9 +1504,9 @@
       : { id: it.id, name: it.name, color: it.color, desc: it.desc, custom: true, plot: d => c.plot(d) };
   }
   function mountCustoms() {
-    STRATS.splice(0, STRATS.length, ...BUILTIN_STRATS.filter(x => !hiddenIds.includes(x.id)));
-    INDS.splice(0, INDS.length, ...BUILTIN_INDS.filter(x => !hiddenIds.includes(x.id)));
-    customs.forEach(it => {
+    STRATS.splice(0, STRATS.length, ...BUILTIN_STRATS.filter(x => !offIds().includes(x.id)));
+    INDS.splice(0, INDS.length, ...BUILTIN_INDS.filter(x => !offIds().includes(x.id)));
+    customs.filter(it => !hiddenIds.includes(it.id)).forEach(it => {
       try { (it.kind === 'strategy' ? STRATS : INDS).push(toItem(it)); } catch (e) { console.warn('추가한 항목을 읽지 못했습니다', it.name, e); }
     });
   }
@@ -1562,8 +1590,8 @@
     renderWatch();
     if (modalTicker) showModalTicker(modalTicker);
   });
-  // ---------- "－ 삭제": 신호·지표 지우기 ----------
-  // 내가 추가한 것은 완전히 지우고, 사이트 기본 신호·지표는 숨겨 둔다 (아래 '지운 기본 항목'에서 되살리기)
+  // ---------- "가리기·삭제": 신호·지표 잠깐 가리기 / 영구 삭제 ----------
+  // 가리기: 목록에서만 빠지고 '가린 항목'에서 다시 보이기. 삭제: 내가 추가한 것은 지우고, 사이트 기본 항목은 다시 안 나옴
   let delKind = 'strategy';
   function afterItemsChanged() {
     mountCustoms();
@@ -1573,17 +1601,24 @@
     renderWatch();
     if (modalTicker) showModalTicker(modalTicker);
   }
+  const findItem = id => customs.find(x => x.id === id) || BUILTIN_STRATS.concat(BUILTIN_INDS).find(x => x.id === id);
+  const isStrat = id => BUILTIN_STRATS.some(x => x.id === id) || customs.some(x => x.id === id && x.kind === 'strategy');
+  function lastStratGuard(id) {
+    if (isStrat(id) && STRATS.some(x => x.id === id) && STRATS.length <= 1) { alert('매매 신호는 하나 이상 남아 있어야 합니다.'); return true; }
+    return false;
+  }
+  function hideItem(id) {
+    if (!findItem(id) || lastStratGuard(id)) return;
+    hiddenIds = hiddenIds.filter(x => x !== id).concat(id); lsSet(HIDDEN_KEY, hiddenIds);
+    afterItemsChanged();
+  }
   function deleteItem(id) {
-    const custom = customs.find(x => x.id === id);
-    const builtin = BUILTIN_STRATS.concat(BUILTIN_INDS).find(x => x.id === id);
-    const it = custom || builtin;
-    if (!it) return;
-    if (BUILTIN_STRATS.some(x => x.id === id) || (custom && custom.kind === 'strategy')) {
-      if (STRATS.length <= 1) { alert('매매 신호는 하나 이상 남아 있어야 합니다.'); return; }
-    }
-    if (!confirm(`'${it.name}'을(를) 지울까요?${custom ? '' : '\n(사이트 기본 항목이라 나중에 되살릴 수 있습니다)'}`)) return;
+    const custom = customs.find(x => x.id === id), it = findItem(id);
+    if (!it || lastStratGuard(id)) return;
+    if (!confirm(`'${it.name}'을(를) 영구 삭제할까요?\n다시 되돌릴 수 없습니다. 잠깐 안 보이게 하려면 '가리기'를 쓰세요.`)) return;
+    hiddenIds = hiddenIds.filter(x => x !== id); lsSet(HIDDEN_KEY, hiddenIds);
     if (custom) { customs = customs.filter(x => x.id !== id); lsSet(CUSTOM_KEY, customs); }
-    else { hiddenIds = hiddenIds.concat(id); lsSet(HIDDEN_KEY, hiddenIds); }
+    else { deletedIds = deletedIds.concat(id); lsSet(DELETED_KEY, deletedIds); }
     afterItemsChanged();
   }
   function restoreItem(id) {
@@ -1591,17 +1626,18 @@
     lsSet(HIDDEN_KEY, hiddenIds);
     afterItemsChanged();
   }
+  const itemName = it => `<span class="strat-name" style="--c:${it.color || '#787B86'}"><i></i><b>${esc(it.name)}</b></span> <span class="muted small">${it.custom || it.code ? '내가 추가' : '사이트 기본'}</span>`;
   function renderDelList() {
     if ($('#del-panel').hidden) return;
     const strat = delKind === 'strategy';
-    const list = strat ? STRATS : INDS, base = strat ? BUILTIN_STRATS : BUILTIN_INDS;
-    $('#del-title').textContent = strat ? '매매 신호 삭제' : '차트 지표 삭제';
+    const list = strat ? STRATS : INDS;
+    $('#del-title').textContent = strat ? '매매 신호 가리기·삭제' : '차트 지표 가리기·삭제';
     $('#del-list').innerHTML = list.length
-      ? list.map(it => `<li><span class="strat-name" style="--c:${it.color || '#787B86'}"><i></i><b>${esc(it.name)}</b></span> <span class="muted small">${it.custom ? '내가 추가' : '사이트 기본'}</span> <button type="button" class="ghost mini danger" data-del-id="${esc(it.id)}">삭제</button></li>`).join('')
+      ? list.map(it => `<li>${itemName(it)} <span class="del-btns"><button type="button" class="ghost mini" data-hide-id="${esc(it.id)}">가리기</button><button type="button" class="ghost mini danger" data-del-id="${esc(it.id)}">영구 삭제</button></span></li>`).join('')
       : '<li class="muted small">없습니다.</li>';
-    const gone = base.filter(x => hiddenIds.includes(x.id));
+    const gone = (strat ? BUILTIN_STRATS : BUILTIN_INDS).concat(customs.filter(x => x.kind === (strat ? 'strategy' : 'indicator'))).filter(x => hiddenIds.includes(x.id));
     $('#del-hidden-wrap').hidden = !gone.length;
-    $('#del-hidden').innerHTML = gone.map(it => `<li><span class="strat-name" style="--c:${it.color || '#787B86'}"><i></i><b>${esc(it.name)}</b></span> <button type="button" class="ghost mini" data-restore-id="${esc(it.id)}">되살리기</button></li>`).join('');
+    $('#del-hidden').innerHTML = gone.map(it => `<li>${itemName(it)} <span class="del-btns"><button type="button" class="ghost mini" data-restore-id="${esc(it.id)}">다시 보이기</button><button type="button" class="ghost mini danger" data-del-id="${esc(it.id)}">영구 삭제</button></span></li>`).join('');
   }
   function openDel(kind) {
     delKind = kind === 'indicator' ? 'indicator' : 'strategy';
@@ -1611,8 +1647,9 @@
   $('#del-close').addEventListener('click', () => { $('#del-panel').hidden = true; });
   $('#del-panel').addEventListener('click', e => {
     if (e.target === $('#del-panel')) { $('#del-panel').hidden = true; return; }
-    const d = e.target.closest('[data-del-id]'), r = e.target.closest('[data-restore-id]');
+    const d = e.target.closest('[data-del-id]'), r = e.target.closest('[data-restore-id]'), h = e.target.closest('[data-hide-id]');
     if (d) deleteItem(d.dataset.delId);
+    else if (h) hideItem(h.dataset.hideId);
     else if (r) restoreItem(r.dataset.restoreId);
   });
   $('#add-list').addEventListener('click', e => {
