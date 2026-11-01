@@ -299,6 +299,8 @@ body.modal-open { overflow: hidden; }
 .add-list { list-style: none; margin: 0; padding: 0; }
 .add-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .add-list li button { margin-left: auto; }
+.add-list .del-btns { margin-left: auto; display: flex; gap: 6px; }
+.add-list .del-btns button { margin-left: 0; }
 .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--card); color: var(--sub); border: 1.5px solid var(--line); padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
 .chip:hover { background: var(--card); border-color: var(--c); }
 .chip i, .strat-name i, .strat-head i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
@@ -333,6 +335,12 @@ body.modal-open { overflow: hidden; }
 .wl-form select { flex: none; width: auto; padding: 7px 4px; font-size: 13px; }
 .wl-sec { gap: 4px; padding: 12px 4px 4px; font-size: 12px; font-weight: 700; color: var(--sub); border-top: 1px solid var(--line); margin-top: 6px; }
 .wl-sec:first-child { border-top: 0; margin-top: 0; padding-top: 4px; }
+.wl-list li.fold:not(.on) { display: none; }
+.wl-list.only li.fold[data-sig="buy"], .wl-list.only li.fold[data-sig="sell"] { display: flex; }
+.wl-grp-btn { flex: 1; display: flex; align-items: center; gap: 6px; padding: 9px 6px; border: 0; background: var(--soft); border-radius: 10px; margin: 3px 0; font: inherit; font-size: 14px; color: var(--text); cursor: pointer; text-align: left; }
+.wl-grp-btn:hover { filter: brightness(.97); }
+.wl-grp-arrow { width: 14px; color: var(--sub); font-size: 15px; }
+.wl-grp-sig { margin-left: auto; display: flex; gap: 4px; }
 .wl-kind { flex: none; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
 .wl-kind.hold { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
 .wl-kind:hover { color: var(--text); border-color: var(--sub); }
