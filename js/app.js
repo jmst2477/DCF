@@ -423,6 +423,8 @@
   function sigState(d, sim) {
     const L = d.close.length - 1;
     if (!sim || sim.error) return { cls: 'none', text: '계산 오류', short: '' };
+    // 이미 산 상태(매수 유지 중)에서 매수 조건이 또 나오면 새 매수가 아님: 성적 계산도 추가로 사지 않음 (물타기 없음)
+    if (sim.out.buy[L] && sim.pos) return { cls: 'hold', text: '매수 유지 중 · 오늘 매수 조건이 또 나왔지만 이미 산 상태라 추가 매수 신호가 아닙니다', short: '매수 유지' };
     if (sim.out.buy[L]) return { cls: 'buy', text: '오늘 매수 신호', short: '매수' };
     if (sim.out.exit[L] && sim.pos) return { cls: 'sell', text: '오늘 청산 신호', short: '청산' };
     if (sim.pos) return { cls: 'hold', text: '매수 유지 중 · 청산 신호 기다리는 중', short: '매수 유지' };
