@@ -463,6 +463,7 @@
     if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = bt.tp || '';
   }
   function btChanged() {
+    if ($('#bt-search') && !$('#bt-search').hidden) $('#bt-search').hidden = true;
     saveBt();
     renderBt();
     if (!$('#chart-modal').hidden) { renderWatch(); if (modalTicker) showModalTicker(modalTicker); }
@@ -474,6 +475,58 @@
     btChanged();
   }));
   renderBt();
+  // "손절·익절 찾기": 지금 종목·신호·기간으로 손절 × 익절 조합을 모두 다시 계산해 누적 수익 순으로 보여 줌.
+  // 지난 데이터에 맞춘 값이라 앞으로도 똑같이 맞는다는 보장은 없음 (안내 문구로 표시)
+  const SL_GRID = [null, 5, 7, 10, 15, 20, 25, 30], TP_GRID = [null, 10, 15, 20, 30, 50, 75, 100];
+  const pctTxt = v => (v ? v + '%' : '안 씀');
+  async function findSlTp() {
+    const box = $('#bt-search'), s = activeStrats()[0], t = modalTicker;
+    box.hidden = false; box.dataset.t = t || '';
+    if (!s || !t) { box.innerHTML = '<p class="muted small">종목과 신호를 먼저 고르세요.</p>'; return; }
+    box.innerHTML = '<p class="muted small">계산 중...</p>';
+    let r;
+    try { r = await getSig(t); } catch (e) { box.innerHTML = '<p class="neg small">주가를 불러오지 못했습니다.</p>'; return; }
+    const keep = { sl: bt.sl, tp: bt.tp }, rows = [];
+    try {
+      for (const sl of SL_GRID) for (const tp of TP_GRID) {
+        bt.sl = sl; bt.tp = tp;
+        const st = statsOf(simulate(r.d, s));
+        if (st) rows.push({ sl, tp, st });
+      }
+    } catch (e) { box.innerHTML = `<p class="neg small">계산 오류: ${esc(e.message || e)}</p>`; return; }
+    finally { bt.sl = keep.sl; bt.tp = keep.tp; }
+    if (!rows.length) { box.innerHTML = `<p class="muted small">${esc(t)}: 최근 ${bt.years}년 동안 이 신호의 거래가 없습니다.</p>`; return; }
+    // 손절·익절이 한 번도 안 걸려 결과가 똑같은 조합은 하나만 (더 단순한 설정, 즉 '안 씀'에 가까운 쪽을 남김)
+    const sig = x => [x.st.n, x.st.total.toFixed(6), x.st.mdd.toFixed(6)].join('|'), seen = new Set();
+    const uniq = rows.filter(x => { const k = sig(x); if (seen.has(k)) return false; seen.add(k); return true; });
+    const ok = uniq.filter(x => x.st.n >= 3), pool = ok.length ? ok : uniq;
+    pool.sort((a, b) => b.st.total - a.st.total);
+    const base = rows.find(x => !x.sl && !x.tp), cur = rows.find(x => x.sl === keep.sl && x.tp === keep.tp);
+    const safest = pool.slice().sort((a, b) => b.st.mdd - a.st.mdd || b.st.total - a.st.total)[0];
+    const show = [];
+    pool.slice(0, 5).forEach(x => show.push([x, show.length ? '' : '누적 수익 1위']));
+    const sh = show.find(y => y[0] === safest);
+    if (sh) sh[1] = sh[1] ? sh[1] + ' · 낙폭 가장 작음' : '낙폭 가장 작음';
+    else if (safest) show.push([safest, '낙폭 가장 작음']);
+    if (base && !show.some(y => y[0] === base)) show.push([base, '손절·익절 안 씀']);
+    if (cur && !show.some(y => y[0] === cur)) show.push([cur, '지금 설정']);
+    const pr = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
+    box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · 최근 ${bt.years}년</b> <span class="muted small">손절 ${SL_GRID.length} × 익절 ${TP_GRID.length} = ${SL_GRID.length * TP_GRID.length}가지 조합 계산</span><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>
+      <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th>최대 낙폭</th><th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
+        <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${pr(x.st.mdd)}</td>
+        <td class="muted small">${tag}</td><td><button type="button" class="ghost mini" data-bt-apply="${x.sl || ''},${x.tp || ''}">적용</button></td></tr>`).join('')}</tbody></table></div>
+      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)}. 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
+  }
+  $('#bt-find').addEventListener('click', findSlTp);
+  $('#bt-search').addEventListener('click', e => {
+    if (e.target.closest('[data-bt-close]')) { $('#bt-search').hidden = true; return; }
+    const a = e.target.closest('[data-bt-apply]');
+    if (!a) return;
+    const [sl, tp] = a.dataset.btApply.split(',').map(v => parseFloat(v) || null);
+    bt.sl = sl; bt.tp = tp;
+    $('#bt-search').hidden = true;
+    btChanged();
+  });
   // "ⓘ 신호 설명" 버튼은 아래 설명 칸이 열려 있을 때 눌린 모양으로 (칸 제목을 눌러 닫아도 같이 바뀜)
   const syncAbout = () => $$('.chip[data-about]').forEach(c => c.classList.toggle('on', !!$('#modal-info')?.open));
   $('#modal-info')?.addEventListener('toggle', syncAbout);
@@ -493,6 +546,7 @@
       if (b.dataset.sid === stratSel) return;
       stratSel = b.dataset.sid;
       lsSet('dcf-strategy-id', stratSel);
+      $('#bt-search').hidden = true; // 다른 신호의 결과는 숨김
     } else if (ib) {
       const id = ib.dataset.iid;
       indOff = indOff.includes(id) ? indOff.filter(x => x !== id) : [...indOff, id];
@@ -1259,6 +1313,7 @@
   }
   async function showModalTicker(t) {
     modalTicker = t;
+    if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) $('#bt-search').hidden = true; // 다른 종목 결과는 숨김
     renderWatch();
     $('#modal-title').textContent = t;
     $('#modal-sub').textContent = '불러오는 중…';
