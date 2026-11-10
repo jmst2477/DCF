@@ -1574,9 +1574,16 @@
   const XFER_KEYS = ['dcf-watchlist', 'dcf-holdings', 'dcf-themes', 'dcf-theme-pick', 'dcf-wl-open', 'dcf-strategy-id', 'dcf-indicators-off',
     'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-backtest'];
   const XFER_PREFIX = 'DCF1:';
-  function xferExport() {
+  function xferSnapshot() {
     const o = {};
     XFER_KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v != null) o[k] = JSON.parse(v); } catch (e) { /* 깨진 값은 건너뜀 */ } });
+    return o;
+  }
+  function xferApply(o) {
+    XFER_KEYS.forEach(k => { try { if (k in o) localStorage.setItem(k, JSON.stringify(o[k])); else localStorage.removeItem(k); } catch (e) { /* 저장 불가 */ } });
+  }
+  function xferExport() {
+    const o = xferSnapshot();
     return XFER_PREFIX + btoa(unescape(encodeURIComponent(JSON.stringify(o))));
   }
   function xferImport(code) {
@@ -1585,7 +1592,7 @@
     let o;
     try { o = JSON.parse(decodeURIComponent(escape(atob(code.slice(XFER_PREFIX.length))))); } catch (e) { throw new Error('코드가 잘렸거나 깨졌습니다. 다시 복사해 주세요.'); }
     if (!o || typeof o !== 'object' || !Array.isArray(o['dcf-watchlist'] || [])) throw new Error('코드 내용을 읽지 못했습니다.');
-    XFER_KEYS.forEach(k => { if (k in o) localStorage.setItem(k, JSON.stringify(o[k])); else localStorage.removeItem(k); });
+    xferApply(o);
     return (o['dcf-watchlist'] || []).length;
   }
   const xferShow = (mode, msg) => {
@@ -1618,6 +1625,153 @@
     } catch (e) { $('#xfer-msg').innerHTML = `<span class="neg">${esc(e.message || e)}</span>`; }
   });
   $('#xfer-close').addEventListener('click', () => { $('#xfer-box').hidden = true; });
+
+  // ---------- 자동 동기화 (/api/sync) ----------
+  // 한 번 켜 두면 위 설정이 바뀔 때마다 서버에 올리고, 사이트를 열거나 다시 볼 때 서버 것을 받아 맞춥니다.
+  // 비밀번호는 이 브라우저에만 저장(dcf-sync-pw)되고 내보내기·동기화 대상이 아닙니다. 마지막에 서버와 맞춘 내용은 dcf-sync-last.
+  const SYNC_PW = 'dcf-sync-pw', SYNC_LAST = 'dcf-sync-last', SYNC_AT = 'dcf-sync-at';
+  const sGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const lsPut = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 저장 불가 */ } };
+  const snapStr = () => JSON.stringify(xferSnapshot());
+  let syncBusy = false, syncErr = '';
+  async function syncCall(action, password, data) {
+    const r = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, password, data }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(j.error || `서버 오류 ${r.status}`); e.status = r.status; throw e; }
+    return j;
+  }
+  const syncOn = () => !!sGet(SYNC_PW);
+  function syncMark(str, at) { lsPut(SYNC_LAST, str); lsPut(SYNC_AT, at || new Date().toISOString()); }
+  async function syncPush() {
+    const pw = sGet(SYNC_PW); if (!pw || syncBusy) return;
+    const str = snapStr();
+    if (str === sGet(SYNC_LAST)) return;
+    syncBusy = true;
+    try { const j = await syncCall('push', pw, JSON.parse(str)); syncMark(str, j.updatedAt); syncErr = ''; } catch (e) { syncFail(e); }
+    syncBusy = false; syncLabel();
+  }
+  // 서버 것을 받아 다르면 맞춘다. 반환: 바뀌었으면 true
+  async function syncPull() {
+    const pw = sGet(SYNC_PW); if (!pw || syncBusy) return false;
+    syncBusy = true;
+    let changed = false;
+    try {
+      const j = await syncCall('pull', pw);
+      const local = snapStr();
+      if (!j.data) { syncBusy = false; await syncPush(); return false; }
+      const remote = JSON.stringify(j.data);
+      if (local !== sGet(SYNC_LAST) && sGet(SYNC_LAST) != null) {
+        // 이 브라우저에서 아직 못 올린 변경이 있으면 이쪽이 이깁니다
+        syncBusy = false; await syncPush(); return false;
+      }
+      if (remote !== local) { xferApply(j.data); changed = true; }
+      syncMark(snapStr(), j.updatedAt); syncErr = '';
+    } catch (e) { syncFail(e); }
+    syncBusy = false; syncLabel();
+    return changed;
+  }
+  function syncFail(e) {
+    syncErr = e.message || String(e);
+    if (e.status === 401) { lsPut(SYNC_PW, null); syncErr = '비밀번호가 바뀌어 동기화가 꺼졌습니다. 다시 켜 주세요.'; }
+  }
+  function syncLabel() {
+    const b = $('#sync-btn'); if (!b) return;
+    b.onclick = null;
+    b.textContent = syncOn() ? (syncErr ? '☁ 동기화 오류' : '☁ 동기화 켜짐') : '☁ 자동 동기화';
+    b.classList.toggle('on', syncOn() && !syncErr);
+    b.classList.toggle('err', !!syncErr);
+    if (!$('#sync-box').hidden) syncBox();
+  }
+  const fmtAt = iso => { try { const d = new Date(iso); return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } };
+  async function syncBox() {
+    const box = $('#sync-box'), msg = $('#sync-msg');
+    box.hidden = false;
+    $('#sync-form').hidden = true; $('#sync-choice').hidden = true; $('#sync-off').hidden = true; $('#sync-now').hidden = true;
+    if (syncOn()) {
+      msg.innerHTML = `<b>자동 동기화 켜짐.</b> 이 브라우저에서 종목·신호·손절익절을 바꾸면 몇 초 안에 서버에 올라가고, 다른 기기는 사이트를 열거나 다시 볼 때 받아 맞춥니다.` +
+        (sGet(SYNC_AT) ? `<br><span class="muted">마지막으로 맞춘 때: ${esc(fmtAt(sGet(SYNC_AT)))}</span>` : '') +
+        (syncErr ? `<br><span class="neg">${esc(syncErr)}</span>` : '');
+      $('#sync-off').hidden = false; $('#sync-now').hidden = false;
+      return;
+    }
+    msg.textContent = '서버 확인 중…';
+    let st = {};
+    try { st = await (await fetch('/api/sync', { cache: 'no-store' })).json(); } catch (e) { st = { error: '서버에 연결하지 못했습니다.' }; }
+    if (syncOn()) return syncBox();
+    if (!st.configured) {
+      msg.innerHTML = '<b>서버 저장소가 아직 연결되지 않았습니다.</b> Vercel에서 저장소를 한 번만 연결하면 이 버튼으로 켤 수 있습니다. 연결 순서는 대화방에 적어 두었습니다.' +
+        (syncErr ? `<br><span class="neg">${esc(syncErr)}</span>` : '');
+      return;
+    }
+    msg.innerHTML = st.hasPassword
+      ? '다른 기기에서 정한 <b>동기화 비밀번호</b>를 넣고 켜세요. 이 브라우저에서는 한 번만 넣으면 됩니다.'
+      : '처음 켜는 거라 <b>동기화 비밀번호</b>를 새로 정합니다(4자 이상). 다른 기기에서도 이 비밀번호를 한 번 넣으면 같은 설정을 씁니다.' +
+        (syncErr ? `<br><span class="neg">${esc(syncErr)}</span>` : '');
+    if (st.hasPassword && syncErr) msg.innerHTML += `<br><span class="neg">${esc(syncErr)}</span>`;
+    $('#sync-form').hidden = false;
+    $('#sync-pw').focus();
+  }
+  let syncPending = null; // { pw, data, updatedAt }
+  $('#sync-btn').addEventListener('click', () => { const b = $('#sync-box'); if (!b.hidden) { b.hidden = true; return; } syncBox(); });
+  $('#sync-close').addEventListener('click', () => { $('#sync-box').hidden = true; });
+  $('#sync-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const pw = $('#sync-pw').value;
+    const msg = $('#sync-msg');
+    try {
+      const j = await syncCall('pull', pw);
+      $('#sync-pw').value = '';
+      const local = snapStr();
+      if (!j.data || JSON.stringify(j.data) === local) {
+        lsPut(SYNC_PW, pw); syncErr = '';
+        if (!j.data) { const r = await syncCall('push', pw, JSON.parse(local)); syncMark(local, r.updatedAt); } else syncMark(local, j.updatedAt);
+        syncLabel(); syncBox();
+        return;
+      }
+      // 서버와 이 브라우저 설정이 다르면 어느 쪽으로 맞출지 묻는다 (이 브라우저에 종목이 하나도 없으면 묻지 않고 서버 것으로)
+      syncPending = { pw, data: j.data, updatedAt: j.updatedAt };
+      const n = d => ((d['dcf-watchlist'] || []).length + (d['dcf-holdings'] || []).length);
+      if (!n(JSON.parse(local))) { $('#sync-take').click(); return; }
+      $('#sync-form').hidden = true; $('#sync-choice').hidden = false;
+      msg.innerHTML = `서버에 다른 기기의 설정(종목 ${n(j.data)}개)이 있고, 이 브라우저(종목 ${n(JSON.parse(local))}개)와 다릅니다. 어느 쪽으로 맞출까요?`;
+    } catch (x) {
+      msg.innerHTML = `<span class="neg">${esc(x.message || x)}</span>`;
+    }
+  });
+  $('#sync-take').addEventListener('click', () => {
+    if (!syncPending) return;
+    lsPut(SYNC_PW, syncPending.pw); xferApply(syncPending.data); syncMark(snapStr(), syncPending.updatedAt);
+    syncPending = null;
+    location.reload();
+  });
+  $('#sync-give').addEventListener('click', async () => {
+    if (!syncPending) return;
+    lsPut(SYNC_PW, syncPending.pw); lsPut(SYNC_LAST, null); syncPending = null; syncErr = '';
+    await syncPush(); syncBox();
+  });
+  $('#sync-off').addEventListener('click', () => {
+    if (!confirm('이 브라우저의 자동 동기화를 끌까요? 설정은 그대로 남고, 더 이상 다른 기기와 맞추지 않습니다.')) return;
+    lsPut(SYNC_PW, null); lsPut(SYNC_LAST, null); lsPut(SYNC_AT, null); syncErr = ''; syncLabel(); syncBox();
+  });
+  $('#sync-now').addEventListener('click', async () => {
+    await syncPush();
+    if (await syncPull()) { location.reload(); return; }
+    syncBox();
+  });
+  // 바뀌면 올리기: 3초마다 이 브라우저 설정을 마지막으로 맞춘 내용과 비교
+  setInterval(() => { if (syncOn() && !document.hidden) syncPush(); }, 3000);
+  // 다시 볼 때 받기: 다른 기기에서 바꾼 게 있으면 맞춘다 (차트를 보고 있으면 새로 고침 안내만)
+  async function syncRefresh(onLoad) {
+    if (!syncOn()) return;
+    if (!(await syncPull())) return;
+    if (onLoad || $('#chart-modal').hidden) { location.reload(); return; }
+    syncErr = '';
+    const b = $('#sync-btn'); b.textContent = '☁ 새 설정 받음 · 눌러서 새로 고침'; b.classList.add('err');
+    b.onclick = e => { e.stopImmediatePropagation(); location.reload(); };
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncRefresh(false); });
+  syncLabel();
+  syncRefresh(true);
 
   // ---------- "＋ 신호 추가 / ＋ 지표 추가": 파인스크립트를 붙여 넣으면 사이트가 직접 읽어서(js/pine.js) 목록에 추가 ----------
   // 코드를 실행하지 않고 글자를 읽어 정해진 계산만 합니다. 추가한 것은 이 브라우저에만 저장됩니다 (localStorage).

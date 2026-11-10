@@ -376,3 +376,7 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .xfer-box textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: var(--card); color: var(--text); resize: vertical; word-break: break-all; }
 .xfer-actions { display: flex; gap: 6px; margin-top: 6px; }
 .xfer-actions .ghost { margin-left: auto; }
+.xfer-actions input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); color: var(--text); }
+#sync-choice { flex-wrap: wrap; }
+#sync-btn.on { color: var(--pos, #0a8f5a); }
+#sync-btn.err { color: var(--neg, #e53935); }
