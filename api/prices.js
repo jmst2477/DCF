@@ -9,7 +9,7 @@ import { yahooSession } from "./dcf-inputs.js";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function chart(ticker, range, H, crumb, intraday) {
+export async function chart(ticker, range, H, crumb, intraday) {
   const q = (intraday ? `range=${range}&interval=5m&includePrePost=true` : `range=${range}&interval=1d&includePrePost=false&events=div%2Csplit`) +
     (crumb ? `&crumb=${encodeURIComponent(crumb)}` : "");
   const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?${q}`, { headers: H });
@@ -25,6 +25,16 @@ async function chart(ticker, range, H, crumb, intraday) {
   const res = j.chart && j.chart.result && j.chart.result[0];
   if (!res || !res.timestamp) throw new Error("야후: 주가 데이터 없음");
   return res;
+}
+
+// 일봉만 (카카오톡 알림 확인용, api/_signals.js). 쿠키 없이 먼저 해 보고 막히면 세션을 받아 다시
+export async function dailyBars(ticker, range = "5y") {
+  try {
+    return toBars(await chart(ticker, range, { "User-Agent": UA }));
+  } catch {
+    const { H, crumb } = await yahooSession();
+    return toBars(await chart(ticker, range, H, crumb));
+  }
 }
 
 export function toBars(res) {

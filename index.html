@@ -136,7 +136,12 @@
   <div class="modal-box" role="dialog" aria-modal="true" aria-label="차트">
     <aside class="wl">
       <form id="wl-form" class="wl-form"><input id="wl-input" placeholder="예: GEV BE CEG" title="티커를 넣으세요. 여러 개는 띄어 쓰거나 쉼표로 한 번에 추가됩니다." autocomplete="off" autocapitalize="characters"><select id="wl-kind" title="보유 / 관심"><option value="watch">관심</option><option value="hold">보유</option></select><button type="submit" class="mini">추가</button></form>
-      <p class="wl-title muted small"><span>내 종목</span><button type="button" id="sync-btn" class="ghost mini" title="서버에 저장해 여러 브라우저·휴대폰을 자동으로 똑같이 맞춥니다">☁ 자동 동기화</button></p>
+      <p class="wl-title muted small"><span>내 종목</span><button type="button" id="sync-btn" class="ghost mini" title="서버에 저장해 여러 브라우저·휴대폰을 자동으로 똑같이 맞춥니다">☁ 자동 동기화</button><button type="button" id="kakao-btn" class="ghost mini" title="적용한 신호가 새로 나오면 매일 아침 내 카카오톡으로 알려 줍니다">💬 카톡 알림</button></p>
+      <div id="kakao-box" class="xfer-box" hidden>
+        <p id="kakao-msg" class="small"></p>
+        <div id="kakao-list" class="small"></div>
+        <div class="xfer-actions"><button type="button" id="kakao-connect" class="mini" hidden>카카오 로그인으로 연결</button><button type="button" id="kakao-check" class="mini" hidden>지금 확인해서 보내기</button><button type="button" id="kakao-off" class="mini" hidden>끊기</button><button type="button" id="kakao-close" class="ghost mini">닫기</button></div>
+      </div>
       <div id="sync-box" class="xfer-box" hidden>
         <p id="sync-msg" class="small"></p>
         <form id="sync-form" class="xfer-actions" hidden><input id="sync-pw" type="password" placeholder="동기화 비밀번호" autocomplete="current-password" minlength="4"><button type="submit" class="mini">켜기</button></form>

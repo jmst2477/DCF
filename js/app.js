@@ -1729,6 +1729,67 @@
     $('#sync-form').hidden = false;
     $('#sync-pw').focus();
   }
+  // ---------- 카카오톡 알림 (/api/kakao) ----------
+  // 서버가 매일 아침(미국 장 마감 뒤) 동기화된 관심 종목을 종목별 적용 신호로 확인해, 새 매수·청산·손절·익절이 있으면 내 카톡으로 보냅니다.
+  // 동기화 비밀번호로만 연결·확인할 수 있습니다.
+  async function kakaoCall(action) {
+    const r = await fetch('/api/kakao', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, password: sGet(SYNC_PW) }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `서버 오류 ${r.status}`);
+    return j;
+  }
+  const KK = { box: '#kakao-box', msg: '#kakao-msg', list: '#kakao-list' };
+  async function kakaoBox(note) {
+    const box = $(KK.box), msg = $(KK.msg);
+    box.hidden = false;
+    ['#kakao-connect', '#kakao-check', '#kakao-off'].forEach(s => { $(s).hidden = true; });
+    if (note === undefined) $(KK.list).textContent = '';
+    const tail = note ? `<br>${note}` : '';
+    if (!syncOn()) { msg.innerHTML = '먼저 <b>☁ 자동 동기화</b>를 켜 주세요. 서버가 동기화된 종목과 종목별 적용 신호로 매일 확인합니다.' + tail; return; }
+    msg.textContent = '서버 확인 중…';
+    let st = {};
+    try { st = await (await fetch('/api/kakao', { cache: 'no-store' })).json(); } catch (e) { st = {}; }
+    $('#kakao-btn').classList.toggle('on', !!st.connected);
+    if (!st.configured) {
+      msg.innerHTML = '<b>카카오 앱 키가 아직 서버에 없습니다.</b> 카카오 개발자 사이트에서 앱을 만들고 REST API 키를 Vercel 환경 변수 <code>KAKAO_REST_API_KEY</code>에 넣은 뒤 다시 배포하면 됩니다. 순서는 대화방에 적어 두었습니다.' +
+        (st.redirect ? `<br><span class="muted">카카오 앱에 등록할 Redirect URI: ${esc(st.redirect)}</span>` : '') + tail;
+      return;
+    }
+    if (!st.connected) {
+      msg.innerHTML = '카카오 로그인을 한 번 하면, 매일 아침 적용한 신호가 새로 나온 종목을 내 카톡으로 보내 드립니다.' + tail;
+      $('#kakao-connect').hidden = false;
+      return;
+    }
+    const L = st.last;
+    let lastTxt = '';
+    if (L && L.error) lastTxt = `<br><span class="neg">마지막 확인 오류 (${esc(fmtAt(L.at))}): ${esc(L.error)}</span>`;
+    else if (L) lastTxt = `<br><span class="muted">마지막 확인: ${esc(fmtAt(L.at))} · ${esc(L.date || '')} 종가 · ${L.checked}종목 · 새 신호 ${L.events}개${L.sent ? ' · 카톡 보냄' : ''}</span>` +
+      (L.errors && L.errors.length ? `<br><span class="neg">주가를 못 받은 종목: ${esc(L.errors.join(', '))}</span>` : '');
+    msg.innerHTML = '<b>카카오톡 알림 켜짐.</b> 매일 아침 7시쯤(미국 장 마감 뒤) 종목별 적용 신호에 새 매수·청산·손절·익절이 있으면 카톡으로 보냅니다. 신호가 없는 날은 보내지 않습니다.' + lastTxt + tail;
+    $('#kakao-check').hidden = false; $('#kakao-off').hidden = false;
+  }
+  async function kakaoDo(action, btn) {
+    btn.disabled = true;
+    try {
+      const j = await kakaoCall(action);
+      if (action === 'start') { location.href = j.url; return; }
+      if (action === 'check') {
+        $(KK.list).textContent = (j.messages || []).join('\n\n');
+        await kakaoBox(`<span class="pos">${j.sent ? '카톡으로 보냈습니다.' : '보낼 내용이 없습니다.'}</span>`);
+      } else await kakaoBox(action === 'off' ? '연결을 끊었습니다.' : undefined);
+    } catch (e) { await kakaoBox(`<span class="neg">${esc(e.message || String(e))}</span>`); }
+    btn.disabled = false;
+  }
+  $('#kakao-btn').addEventListener('click', () => { const b = $(KK.box); if (!b.hidden) { b.hidden = true; return; } kakaoBox(); });
+  $('#kakao-close').addEventListener('click', () => { $(KK.box).hidden = true; });
+  $('#kakao-connect').addEventListener('click', e => kakaoDo('start', e.currentTarget));
+  $('#kakao-check').addEventListener('click', e => kakaoDo('check', e.currentTarget));
+  $('#kakao-off').addEventListener('click', e => { if (confirm('카카오톡 알림 연결을 끊을까요?')) kakaoDo('off', e.currentTarget); });
+  // 카카오 로그인 뒤 돌아오면 (/?kakao=ok) 주소를 정리하고 차트 화면의 알림 창을 열어 보여 줌
+  if (/[?&]kakao=ok/.test(location.search)) {
+    try { history.replaceState(null, '', location.pathname); } catch (e) { /* 무시 */ }
+    setTimeout(() => { const c = $('#btn-chart'); if (c) c.click(); kakaoBox('<span class="pos">연결됐습니다. 카톡에 시험 메시지를 보냈습니다.</span>'); }, 300);
+  }
   let syncPending = null; // { pw, data, updatedAt }
   $('#sync-btn').addEventListener('click', () => { const b = $('#sync-box'); if (!b.hidden) { b.hidden = true; return; } syncBox(); });
   $('#sync-close').addEventListener('click', () => { $('#sync-box').hidden = true; });
