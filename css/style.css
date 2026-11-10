@@ -373,14 +373,14 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .bt-for { white-space: nowrap; }
 
 /* 설정 옮기기 */
-.wl-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.wl-title { display: flex; align-items: center; gap: 6px; }
 .xfer-box { margin: 4px 0 10px; padding: 10px; border-radius: 12px; background: var(--soft); }
 .xfer-actions { display: flex; gap: 6px; margin-top: 6px; }
 .xfer-actions .ghost { margin-left: auto; }
 .xfer-actions input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); color: var(--text); }
 #sync-choice { flex-wrap: wrap; }
 #sync-btn.on, #kakao-btn.on { color: var(--pos, #0a8f5a); }
-#kakao-btn { margin-left: 4px; }
+.wl-title > span { margin-right: auto; }
 #kakao-list:empty { display: none; }
 #kakao-list { margin-top: 6px; white-space: pre-line; }
 #sync-btn.err { color: var(--neg, #e53935); }
