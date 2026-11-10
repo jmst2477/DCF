@@ -446,6 +446,18 @@
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 저장 불가 */ } };
   let stratSel = lsGet('dcf-strategy-id', null);
   let indOff = lsGet('dcf-indicators-off', []);
+  // 종목별로 손절·익절을 적용할 때 쓴 신호 (그 종목을 열면 이 신호로 먼저 보여 줌)
+  const TSTRAT_KEY = 'dcf-ticker-strat';
+  let tstrat = lsGet(TSTRAT_KEY, {});
+  if (!tstrat || typeof tstrat !== 'object') tstrat = {};
+  function setTickerStrat(t, sid) { if (!t || !sid) return; tstrat[t] = sid; lsSet(TSTRAT_KEY, tstrat); }
+  // 종목을 열 때: 저장된 신호가 있고 지금 고른 신호와 다르면 그 신호로 바꿈. 바뀌었으면 true
+  function useTickerStrat(t) {
+    const sid = t && tstrat[t];
+    if (!sid || sid === stratSel || !STRATS.some(x => x.id === sid)) return false;
+    stratSel = sid; lsSet('dcf-strategy-id', stratSel); renderPickers();
+    return true;
+  }
   const activeStrats = () => {
     if (!STRATS.some(s => s.id === stratSel)) stratSel = STRATS[0] && STRATS[0].id;
     return STRATS.filter(s => s.id === stratSel);
@@ -474,7 +486,8 @@
     const rule = sltpOf(mt);
     if (document.activeElement !== $('#bt-sl')) $('#bt-sl').value = rule.sl || '';
     if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = rule.tp || '';
-    $('#bt-for').textContent = mt ? mt + ' 전용' : '';
+    const ts = mt && tstrat[mt] && STRATS.find(x => x.id === tstrat[mt]);
+    $('#bt-for').textContent = mt ? mt + ' 전용' + (ts ? ' · ' + ts.name : '') : '';
   }
   function btChanged() {
     saveBt();
@@ -488,6 +501,7 @@
     const rule = sltpOf(modalTicker);
     rule[k] = v > 0 && v < 100 ? v : null;
     setSltp(modalTicker, rule);
+    setTickerStrat(modalTicker, stratSel);
     btChanged();
   }));
   renderBt();
@@ -500,7 +514,7 @@
   function searchRefresh() { const b = $('#bt-search'); if (b && !b.hidden) setTimeout(findSlTp, 0); }
   async function findSlTp() {
     const box = $('#bt-search'), s = activeStrats()[0], t = modalTicker, run = ++searchRun;
-    box.hidden = false; box.dataset.t = t || '';
+    box.hidden = false; box.dataset.t = t || ''; box.dataset.sid = s ? s.id : '';
     if (!s || !t) { box.innerHTML = '<p class="muted small">종목과 신호를 먼저 고르세요.</p>'; return; }
     box.innerHTML = '<p class="muted small">계산 중...</p>';
     let r;
@@ -542,6 +556,7 @@
     if (!a) return;
     const [sl, tp] = a.dataset.btApply.split(',').map(v => parseFloat(v) || null);
     setSltp($('#bt-search').dataset.t || modalTicker, { sl, tp });
+    setTickerStrat($('#bt-search').dataset.t || modalTicker, $('#bt-search').dataset.sid || stratSel);
     btChanged(); // 결과 칸은 열린 채로 '지금 설정'이 바뀐 걸 다시 보여 줌
   });
   // "ⓘ 신호 설명" 버튼은 아래 설명 칸이 열려 있을 때 눌린 모양으로 (칸 제목을 눌러 닫아도 같이 바뀜)
@@ -1330,6 +1345,7 @@
   }
   async function showModalTicker(t) {
     modalTicker = t;
+    useTickerStrat(t); // 이 종목에 손절·익절을 적용한 신호가 있으면 그 신호로 먼저
     renderBt(); // 손절·익절 칸은 이 종목 값으로
     if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) searchRefresh(); // 열려 있으면 새 종목으로 다시 계산
     renderWatch();
@@ -1574,7 +1590,7 @@
   // 옮기는 것: 관심·보유 종목, 순서, 테마, 펼친 묶음, 고른 신호·지표, 추가·가린·삭제한 신호, 종목별 손절·익절, 성적 기간.
   // 옮기지 않는 것: Claude API 키(비밀), 목록 칸 크기(화면마다 다름), DCF 계산 칸.
   const XFER_KEYS = ['dcf-watchlist', 'dcf-holdings', 'dcf-themes', 'dcf-theme-pick', 'dcf-wl-open', 'dcf-strategy-id', 'dcf-indicators-off',
-    'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-backtest'];
+    'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-ticker-strat', 'dcf-backtest'];
   function xferSnapshot() {
     const o = {};
     XFER_KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v != null) o[k] = JSON.parse(v); } catch (e) { /* 깨진 값은 건너뜀 */ } });
