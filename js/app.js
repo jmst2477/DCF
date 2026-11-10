@@ -314,17 +314,27 @@
 
   // 성적 계산 설정: 기간(최근 몇 년), 손절·익절 % (비우면 안 씀). 모든 신호에 똑같이 적용
   const BT_KEY = 'dcf-backtest';
-  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [1, 3, 5].includes(o.years) ? o.years : 5, sl: o.sl > 0 ? o.sl : null, tp: o.tp > 0 ? o.tp : null }; } catch (e) { return { years: 5, sl: null, tp: null }; } })();
+  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [1, 3, 5].includes(o.years) ? o.years : 5 }; } catch (e) { return { years: 5 }; } })();
   const saveBt = () => lsSet(BT_KEY, bt);
-  const simKey = s => `${s.id}|${bt.sl || ''}|${bt.tp || ''}`;
+  // 손절·익절은 종목마다 따로 저장 (예: AEHR은 -10%/+30%, GEV는 안 씀). 없으면 안 씀
+  const SLTP_KEY = 'dcf-sltp';
+  let sltp = (() => { try { const o = JSON.parse(localStorage.getItem(SLTP_KEY)); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
+  const sltpOf = t => { const o = (t && sltp[t]) || {}; return { sl: o.sl > 0 ? o.sl : null, tp: o.tp > 0 ? o.tp : null }; };
+  function setSltp(t, rule) {
+    if (!t) return;
+    if (rule.sl || rule.tp) sltp[t] = { sl: rule.sl || null, tp: rule.tp || null }; else delete sltp[t];
+    lsSet(SLTP_KEY, sltp);
+  }
+  const simKey = (s, rule) => `${s.id}|${rule.sl || ''}|${rule.tp || ''}`;
 
   // 트레이딩뷰 strategy와 같은 방식: 신호 봉 종가에서 판단 → 다음 봉 시가에 체결, 보유 중엔 매수 표시 안 함.
   // 손절·익절: 보유 중 그날 저가가 손절가 아래면 손절가(시가가 이미 아래면 시가)에, 고가가 익절가 위면 익절가에 판다. 같은 날 둘 다 닿으면 손절로 본다.
-  function simulate(d, strat) {
+  function simulate(d, strat, rule) {
+    rule = rule || { sl: null, tp: null };
     const out = strat.run(d, window.TA);
     const n = d.close.length, fee = out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
     if (!out || !Array.isArray(out.buy) || !Array.isArray(out.exit)) throw new Error('buy·exit 배열을 돌려주지 않았습니다.');
-    const sl = bt.sl / 100, tp = bt.tp / 100;
+    const sl = rule.sl / 100, tp = rule.tp / 100;
     const marks = [], trades = [];
     let pos = false, entry = null, pendBuy = false, pendExit = false;
     const close = (i, price, reason) => {
@@ -389,15 +399,15 @@
         .then(async res => {
           const d = await res.json().catch(() => ({}));
           if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
-          return { d, sims: {}, inds: {} };
+          return { t, d, sims: {}, inds: {} };
         });
       sigCache[t].catch(() => delete sigCache[t]); // 실패하면 다음에 다시 시도
     }
     return sigCache[t];
   }
   function simOf(r, s) {
-    const k = simKey(s);
-    if (!(k in r.sims)) { try { r.sims[k] = simulate(r.d, s); } catch (e) { r.sims[k] = { error: e.message || String(e) }; } }
+    const rule = sltpOf(r.t), k = simKey(s, rule);
+    if (!(k in r.sims)) { try { r.sims[k] = simulate(r.d, s, rule); } catch (e) { r.sims[k] = { error: e.message || String(e) }; } }
     return r.sims[k];
   }
   function indOf(r, ind) {
@@ -459,8 +469,12 @@
   // 성적 줄: 기간 버튼과 손절·익절 칸
   function renderBt() {
     $$('.bt-pick .chip[data-years]').forEach(b => { b.classList.toggle('on', +b.dataset.years === bt.years); b.style.setProperty('--c', 'var(--accent)'); });
-    if (document.activeElement !== $('#bt-sl')) $('#bt-sl').value = bt.sl || '';
-    if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = bt.tp || '';
+    // 처음 그릴 때는 종목 변수가 아직 없을 수 있음
+    let mt = null; try { mt = modalTicker; } catch (e) { mt = null; }
+    const rule = sltpOf(mt);
+    if (document.activeElement !== $('#bt-sl')) $('#bt-sl').value = rule.sl || '';
+    if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = rule.tp || '';
+    $('#bt-for').textContent = mt ? mt + ' 전용' : '';
   }
   function btChanged() {
     if ($('#bt-search') && !$('#bt-search').hidden) $('#bt-search').hidden = true;
@@ -471,7 +485,9 @@
   $$('.bt-pick .chip[data-years]').forEach(b => b.addEventListener('click', () => { bt.years = +b.dataset.years; btChanged(); }));
   ['sl', 'tp'].forEach(k => $('#bt-' + k).addEventListener('change', e => {
     const v = parseFloat(e.target.value);
-    bt[k] = v > 0 && v < 100 ? v : null;
+    const rule = sltpOf(modalTicker);
+    rule[k] = v > 0 && v < 100 ? v : null;
+    setSltp(modalTicker, rule);
     btChanged();
   }));
   renderBt();
@@ -486,15 +502,13 @@
     box.innerHTML = '<p class="muted small">계산 중...</p>';
     let r;
     try { r = await getSig(t); } catch (e) { box.innerHTML = '<p class="neg small">주가를 불러오지 못했습니다.</p>'; return; }
-    const keep = { sl: bt.sl, tp: bt.tp }, rows = [];
+    const keep = sltpOf(t), rows = [];
     try {
       for (const sl of SL_GRID) for (const tp of TP_GRID) {
-        bt.sl = sl; bt.tp = tp;
-        const st = statsOf(simulate(r.d, s));
+        const st = statsOf(simulate(r.d, s, { sl, tp }));
         if (st) rows.push({ sl, tp, st });
       }
     } catch (e) { box.innerHTML = `<p class="neg small">계산 오류: ${esc(e.message || e)}</p>`; return; }
-    finally { bt.sl = keep.sl; bt.tp = keep.tp; }
     if (!rows.length) { box.innerHTML = `<p class="muted small">${esc(t)}: 최근 ${bt.years}년 동안 이 신호의 거래가 없습니다.</p>`; return; }
     // 손절·익절이 한 번도 안 걸려 결과가 똑같은 조합은 하나만 (더 단순한 설정, 즉 '안 씀'에 가까운 쪽을 남김)
     const sig = x => [x.st.n, x.st.total.toFixed(6), x.st.mdd.toFixed(6)].join('|'), seen = new Set();
@@ -523,7 +537,7 @@
     const a = e.target.closest('[data-bt-apply]');
     if (!a) return;
     const [sl, tp] = a.dataset.btApply.split(',').map(v => parseFloat(v) || null);
-    bt.sl = sl; bt.tp = tp;
+    setSltp($('#bt-search').dataset.t || modalTicker, { sl, tp });
     $('#bt-search').hidden = true;
     btChanged();
   });
@@ -570,7 +584,7 @@
     return `<p class="earn-warn small">⚠ ${esc(ea.text)}: 실적 발표 전후로는 주가가 크게 튀어 신호가 잘 안 맞습니다. ${st.cls === 'buy' ? '발표 뒤에 들어가는 것도 방법입니다.' : '발표 전에 정리할지 생각해 보세요.'}</p>`;
   }
   const btFromTxt = d => d.time[btStart(d)];
-  const btRuleTxt = ss => (bt.sl || bt.tp ? ` · ${[bt.sl ? `손절 -${bt.sl}%` : '', bt.tp ? `익절 +${bt.tp}%` : ''].filter(Boolean).join(' · ')}${ss && ss.stops ? ` (${ss.stops}번 발동)` : ''}` : '');
+  const btRuleTxt = ss => { const r = sltpOf(modalTicker); return r.sl || r.tp ? ` · ${[r.sl ? `손절 -${r.sl}%` : '', r.tp ? `익절 +${r.tp}%` : ''].filter(Boolean).join(' · ')}${ss && ss.stops ? ` (${ss.stops}번 발동)` : ''}` : ''; };
   // 차트 아래 "신호 자세히": 고른 신호, 모든 전략 승률 비교, 켜 둔 지표 상태, 최근 신호
   function renderSigInfo(r) {
     const d = r.d, n = d.close.length, L = n - 1, last = d.close[L];
@@ -1313,6 +1327,7 @@
   }
   async function showModalTicker(t) {
     modalTicker = t;
+    renderBt(); // 손절·익절 칸은 이 종목 값으로
     if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) $('#bt-search').hidden = true; // 다른 종목 결과는 숨김
     renderWatch();
     $('#modal-title').textContent = t;
@@ -1381,7 +1396,10 @@
       const ea = earnOf(r.d);
       el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}${ea && ea.near ? ` <span class="sig-pill earn" title="${esc(ea.text)}">실적 ${ea.dday ? 'D-' + ea.dday : '오늘'}</span>` : ''}`;
       const rt = list.querySelector(`.wl-rate[data-r="${CSS.escape(t)}"]`);
-      if (rt && sim0 && !sim0.error) rt.textContent = rateTxt(statsOf(sim0));
+      if (rt && sim0 && !sim0.error) {
+        const ru = sltpOf(t);
+        rt.textContent = rateTxt(statsOf(sim0)) + (ru.sl || ru.tp ? ` · ${[ru.sl ? '-' + ru.sl + '%' : '', ru.tp ? '+' + ru.tp + '%' : ''].filter(Boolean).join('/')}` : '');
+      }
       const li = el.closest('li');
       if (li) li.dataset.sig = st.cls;
       // 사전에 없는 종목은 야후 업종으로 테마를 붙입니다
@@ -1607,7 +1625,7 @@
     try {
       const obj = toItem(item), notes = [];
       if (kind === 'strategy') {
-        const sim = simulate(r.d, obj), o = sim.out, ss = statsOf(sim);
+        const sim = simulate(r.d, obj, sltpOf(t)), o = sim.out, ss = statsOf(sim);
         item.desc = `매수: ${o.buyText || '-'}${o.exitText ? ` · 청산: ${o.exitText}` : ''}`;
         notes.push(...(o.notes || []));
         html = `<p>${esc(item.desc)}</p><p>${esc(t)} ${r.d.time[0]} 이후로 시험: 매수 신호 ${o.buy.filter(Boolean).length}번 · 거래 ${ss ? ss.n : 0}번` +
