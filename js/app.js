@@ -1335,6 +1335,7 @@
     document.body.classList.add('modal-open');
     renderPickers();
     renderWatch();
+    modalTicker = null; // 다시 열 때도 그 종목의 신호로 먼저
     if (t) showModalTicker(t);
     else $('#modal-sig').innerHTML = '<p class="muted" style="padding:24px">왼쪽에 관심종목을 추가하거나, 위 검색창에서 종목을 계산하세요.</p>';
   }
@@ -1344,8 +1345,10 @@
     if (modalChart) { modalChart.remove(); modalChart = null; }
   }
   async function showModalTicker(t) {
+    const moved = modalTicker !== t;
     modalTicker = t;
-    useTickerStrat(t); // 이 종목에 손절·익절을 적용한 신호가 있으면 그 신호로 먼저
+    // 다른 종목으로 옮길 때만: 이 종목에 손절·익절을 적용한 신호가 있으면 그 신호로 먼저 (같은 종목에서 신호를 바꾸는 건 그대로 둠)
+    if (moved) useTickerStrat(t);
     renderBt(); // 손절·익절 칸은 이 종목 값으로
     if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) searchRefresh(); // 열려 있으면 새 종목으로 다시 계산
     renderWatch();
