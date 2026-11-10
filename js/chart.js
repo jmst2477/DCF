@@ -111,8 +111,7 @@
       position: m.kind === 'buy' ? 'belowBar' : 'aboveBar',
       shape: m.kind === 'buy' ? 'arrowUp' : 'arrowDown',
       color: strat.color,
-      // 신호를 여러 개 켜면 어느 신호의 표시인지 짧은 이름을 앞에 붙임
-      text: (sets.length > 1 ? (strat.short || strat.name) + ' ' : '') + (m.kind === 'buy' ? '매수 ' : (m.reason || '매도') + ' ') + (m.price || d.close[m.i]).toFixed(2),
+      text: (m.kind === 'buy' ? '매수 ' : (m.reason || '매도') + ' ') + (m.price || d.close[m.i]).toFixed(2),
     })));
     // 실적 발표일 표시: 빈 칸(whitespace)에 단 표시는 마지막 봉으로 끌려가므로, 그날 점 하나만 가진 보이지 않는 선에 단다
     if (future.length && future[future.length - 1] === opts.earn.date) {
