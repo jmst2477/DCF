@@ -1567,13 +1567,11 @@
   document.addEventListener('pointerup', endDrag);
   document.addEventListener('pointercancel', endDrag);
 
-  // ---------- 설정 옮기기 (내보내기·가져오기) ----------
-  // 서버 없이 코드 한 줄로 다른 브라우저(다른 컴퓨터·휴대폰)를 똑같이 맞춥니다.
+  // ---------- 브라우저 사이에 맞추는 설정 목록 (자동 동기화가 씀) ----------
   // 옮기는 것: 관심·보유 종목, 순서, 테마, 펼친 묶음, 고른 신호·지표, 추가·가린·삭제한 신호, 종목별 손절·익절, 성적 기간.
   // 옮기지 않는 것: Claude API 키(비밀), 목록 칸 크기(화면마다 다름), DCF 계산 칸.
   const XFER_KEYS = ['dcf-watchlist', 'dcf-holdings', 'dcf-themes', 'dcf-theme-pick', 'dcf-wl-open', 'dcf-strategy-id', 'dcf-indicators-off',
     'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-backtest'];
-  const XFER_PREFIX = 'DCF1:';
   function xferSnapshot() {
     const o = {};
     XFER_KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v != null) o[k] = JSON.parse(v); } catch (e) { /* 깨진 값은 건너뜀 */ } });
@@ -1582,49 +1580,6 @@
   function xferApply(o) {
     XFER_KEYS.forEach(k => { try { if (k in o) localStorage.setItem(k, JSON.stringify(o[k])); else localStorage.removeItem(k); } catch (e) { /* 저장 불가 */ } });
   }
-  function xferExport() {
-    const o = xferSnapshot();
-    return XFER_PREFIX + btoa(unescape(encodeURIComponent(JSON.stringify(o))));
-  }
-  function xferImport(code) {
-    code = (code || '').replace(/\s+/g, '');
-    if (!code.startsWith(XFER_PREFIX)) throw new Error('이 사이트의 내보내기 코드가 아닙니다. "DCF1:"로 시작하는 코드를 통째로 붙여 넣으세요.');
-    let o;
-    try { o = JSON.parse(decodeURIComponent(escape(atob(code.slice(XFER_PREFIX.length))))); } catch (e) { throw new Error('코드가 잘렸거나 깨졌습니다. 다시 복사해 주세요.'); }
-    if (!o || typeof o !== 'object' || !Array.isArray(o['dcf-watchlist'] || [])) throw new Error('코드 내용을 읽지 못했습니다.');
-    xferApply(o);
-    return (o['dcf-watchlist'] || []).length;
-  }
-  const xferShow = (mode, msg) => {
-    $('#xfer-box').hidden = false;
-    $('#xfer-box').dataset.mode = mode;
-    $('#xfer-msg').innerHTML = msg;
-    $('#xfer-copy').hidden = mode !== 'out';
-    $('#xfer-apply').hidden = mode !== 'in';
-  };
-  $('#xfer-out').addEventListener('click', () => {
-    $('#xfer-code').value = xferExport();
-    xferShow('out', '이 코드를 복사해 다른 브라우저의 <b>가져오기</b>에 붙여 넣으세요. 휴대폰이면 카카오톡 나에게 보내기로 옮기면 편합니다.');
-    $('#xfer-code').select();
-  });
-  $('#xfer-in').addEventListener('click', () => {
-    $('#xfer-code').value = '';
-    xferShow('in', '다른 브라우저에서 <b>내보내기</b>로 복사한 코드를 붙여 넣고 "이 코드로 맞추기"를 누르세요. <span class="neg">이 브라우저의 종목·신호 설정은 코드 내용으로 바뀝니다.</span>');
-    $('#xfer-code').focus();
-  });
-  $('#xfer-copy').addEventListener('click', async () => {
-    const ta = $('#xfer-code');
-    try { await navigator.clipboard.writeText(ta.value); } catch (e) { ta.select(); try { document.execCommand('copy'); } catch (x) { /* 직접 복사 */ } }
-    $('#xfer-msg').innerHTML = '복사했습니다. 다른 브라우저에서 <b>가져오기</b>를 누르고 붙여 넣으세요.';
-  });
-  $('#xfer-apply').addEventListener('click', () => {
-    try {
-      const n = xferImport($('#xfer-code').value);
-      alert(`종목 ${n}개와 신호·손절익절 설정으로 맞췄습니다. 화면을 새로 고칩니다.`);
-      location.reload();
-    } catch (e) { $('#xfer-msg').innerHTML = `<span class="neg">${esc(e.message || e)}</span>`; }
-  });
-  $('#xfer-close').addEventListener('click', () => { $('#xfer-box').hidden = true; });
 
   // ---------- 자동 동기화 (/api/sync) ----------
   // 한 번 켜 두면 위 설정이 바뀔 때마다 서버에 올리고, 사이트를 열거나 다시 볼 때 서버 것을 받아 맞춥니다.

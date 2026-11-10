@@ -371,9 +371,8 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .bt-for { white-space: nowrap; }
 
 /* 설정 옮기기 */
-.wl-xfer { float: right; display: inline-flex; gap: 4px; }
+.wl-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .xfer-box { margin: 4px 0 10px; padding: 10px; border-radius: 12px; background: var(--soft); }
-.xfer-box textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: var(--card); color: var(--text); resize: vertical; word-break: break-all; }
 .xfer-actions { display: flex; gap: 6px; margin-top: 6px; }
 .xfer-actions .ghost { margin-left: auto; }
 .xfer-actions input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); color: var(--text); }
