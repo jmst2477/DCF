@@ -508,6 +508,8 @@
     const cs = STRATS.find(x => x.id === stratSel);
     $('#bt-for').textContent = mt && cs ? `${mt} · ${cs.short || cs.name} 전용${tstrat[mt] === cs.id ? ' ★' : ''}` : '';
     $('#bt-for').title = '손절·익절은 종목과 신호마다 따로 저장됩니다. ★ = 이 종목을 열면 먼저 켜지는 신호';
+    // 풀 것이 있을 때만 누를 수 있음
+    $('#bt-reset').disabled = !(mt && cs && (rule.sl || rule.tp || tstrat[mt] === cs.id));
   }
   function btChanged() {
     saveBt();
@@ -574,6 +576,15 @@
       <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)}. 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''}${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
   }
   $('#bt-find').addEventListener('click', findSlTp);
+  // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
+  $('#bt-reset').addEventListener('click', () => {
+    const t = modalTicker, cs = STRATS.find(x => x.id === stratSel);
+    if (!t || !cs) return;
+    if (!confirm(`${t} · ${cs.name}의 손절·익절을 풀고 처음 상태로 돌릴까요?`)) return;
+    setSltp(t, cs.id, { sl: null, tp: null });
+    if (tstrat[t] === cs.id) { delete tstrat[t]; lsSet(TSTRAT_KEY, tstrat); }
+    btChanged();
+  });
   $('#bt-search').addEventListener('click', e => {
     if (e.target.closest('[data-bt-close]')) { $('#bt-search').hidden = true; return; }
     const a = e.target.closest('[data-bt-apply]');

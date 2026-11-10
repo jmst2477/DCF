@@ -381,6 +381,7 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 #sync-choice { flex-wrap: wrap; }
 #sync-btn.on, #kakao-btn.on { color: var(--pos, #0a8f5a); }
 .wl-title > span { margin-right: auto; }
+#bt-reset:disabled { opacity: .45; cursor: default; }
 #kakao-list:empty { display: none; }
 #kakao-list { margin-top: 6px; white-space: pre-line; }
 #sync-btn.err { color: var(--neg, #e53935); }
