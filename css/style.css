@@ -379,5 +379,8 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .xfer-actions .ghost { margin-left: auto; }
 .xfer-actions input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); color: var(--text); }
 #sync-choice { flex-wrap: wrap; }
-#sync-btn.on { color: var(--pos, #0a8f5a); }
+#sync-btn.on, #kakao-btn.on { color: var(--pos, #0a8f5a); }
+#kakao-btn { margin-left: 4px; }
+#kakao-list:empty { display: none; }
+#kakao-list { margin-top: 6px; white-space: pre-line; }
 #sync-btn.err { color: var(--neg, #e53935); }

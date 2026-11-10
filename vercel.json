@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/kakao.js": { "includeFiles": "js/**", "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/kakao?action=cron", "schedule": "0 22 * * 2-6" }
+  ]
+}
