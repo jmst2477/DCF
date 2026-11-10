@@ -360,3 +360,11 @@ body.modal-open { overflow: hidden; }
 .wl-resize::after { content: ''; width: 3px; height: 36px; border-radius: 3px; background: var(--line); }
 .wl-resize:hover::after, .wl-resize.on::after { background: var(--accent); }
 body.wl-resizing { user-select: none; cursor: col-resize; }
+
+/* 손절·익절 찾기 결과 */
+.bt-search { padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+.bt-search-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 6px; }
+.bt-search-head button { margin-left: auto; }
+.bt-search table td, .bt-search table th { white-space: nowrap; }
+.chip.find { white-space: nowrap; flex-shrink: 0; border-style: dashed; color: var(--accent); background: transparent; }
+.chip.find:hover { border-color: var(--accent); }
