@@ -21,7 +21,7 @@ const MAX_FAILS = 20;
 
 // 브라우저와 같은 목록 (js/app.js 의 XFER_KEYS)
 const KEYS = ["dcf-watchlist", "dcf-holdings", "dcf-themes", "dcf-theme-pick", "dcf-wl-open", "dcf-strategy-id", "dcf-indicators-off",
-  "dcf-custom-items", "dcf-hidden-items", "dcf-deleted-items", "dcf-sltp", "dcf-ticker-strat", "dcf-backtest"];
+  "dcf-custom-items", "dcf-hidden-items", "dcf-deleted-items", "dcf-sltp", "dcf-ticker-strat", "dcf-wl-mode", "dcf-backtest"];
 
 async function redis(...cmd) {
   const r = await fetch(URL_, {
