@@ -477,9 +477,9 @@
     $('#bt-for').textContent = mt ? mt + ' 전용' : '';
   }
   function btChanged() {
-    if ($('#bt-search') && !$('#bt-search').hidden) $('#bt-search').hidden = true;
     saveBt();
     renderBt();
+    searchRefresh();
     if (!$('#chart-modal').hidden) { renderWatch(); if (modalTicker) showModalTicker(modalTicker); }
   }
   $$('.bt-pick .chip[data-years]').forEach(b => b.addEventListener('click', () => { bt.years = +b.dataset.years; btChanged(); }));
@@ -495,13 +495,17 @@
   // 지난 데이터에 맞춘 값이라 앞으로도 똑같이 맞는다는 보장은 없음 (안내 문구로 표시)
   const SL_GRID = [null, 5, 7, 10, 15, 20, 25, 30], TP_GRID = [null, 10, 15, 20, 30, 50, 75, 100];
   const pctTxt = v => (v ? v + '%' : '안 씀');
+  // 찾기 결과 칸이 열려 있으면 신호·종목·기간·손절익절을 바꿀 때마다 그 조건으로 다시 계산 (닫기를 눌러야 닫힘)
+  let searchRun = 0;
+  function searchRefresh() { const b = $('#bt-search'); if (b && !b.hidden) setTimeout(findSlTp, 0); }
   async function findSlTp() {
-    const box = $('#bt-search'), s = activeStrats()[0], t = modalTicker;
+    const box = $('#bt-search'), s = activeStrats()[0], t = modalTicker, run = ++searchRun;
     box.hidden = false; box.dataset.t = t || '';
     if (!s || !t) { box.innerHTML = '<p class="muted small">종목과 신호를 먼저 고르세요.</p>'; return; }
     box.innerHTML = '<p class="muted small">계산 중...</p>';
     let r;
-    try { r = await getSig(t); } catch (e) { box.innerHTML = '<p class="neg small">주가를 불러오지 못했습니다.</p>'; return; }
+    try { r = await getSig(t); } catch (e) { if (run === searchRun) box.innerHTML = '<p class="neg small">주가를 불러오지 못했습니다.</p>'; return; }
+    if (run !== searchRun || box.hidden) return; // 그사이 다른 조건으로 다시 계산 중이거나 닫힘
     const keep = sltpOf(t), rows = [];
     try {
       for (const sl of SL_GRID) for (const tp of TP_GRID) {
@@ -538,8 +542,7 @@
     if (!a) return;
     const [sl, tp] = a.dataset.btApply.split(',').map(v => parseFloat(v) || null);
     setSltp($('#bt-search').dataset.t || modalTicker, { sl, tp });
-    $('#bt-search').hidden = true;
-    btChanged();
+    btChanged(); // 결과 칸은 열린 채로 '지금 설정'이 바뀐 걸 다시 보여 줌
   });
   // "ⓘ 신호 설명" 버튼은 아래 설명 칸이 열려 있을 때 눌린 모양으로 (칸 제목을 눌러 닫아도 같이 바뀜)
   const syncAbout = () => $$('.chip[data-about]').forEach(c => c.classList.toggle('on', !!$('#modal-info')?.open));
@@ -560,7 +563,7 @@
       if (b.dataset.sid === stratSel) return;
       stratSel = b.dataset.sid;
       lsSet('dcf-strategy-id', stratSel);
-      $('#bt-search').hidden = true; // 다른 신호의 결과는 숨김
+      searchRefresh(); // 열려 있으면 새 신호로 다시 계산
     } else if (ib) {
       const id = ib.dataset.iid;
       indOff = indOff.includes(id) ? indOff.filter(x => x !== id) : [...indOff, id];
@@ -1328,7 +1331,7 @@
   async function showModalTicker(t) {
     modalTicker = t;
     renderBt(); // 손절·익절 칸은 이 종목 값으로
-    if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) $('#bt-search').hidden = true; // 다른 종목 결과는 숨김
+    if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) searchRefresh(); // 열려 있으면 새 종목으로 다시 계산
     renderWatch();
     $('#modal-title').textContent = t;
     $('#modal-sub').textContent = '불러오는 중…';
