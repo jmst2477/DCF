@@ -369,3 +369,10 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .chip.find { white-space: nowrap; flex-shrink: 0; border-style: dashed; color: var(--accent); background: transparent; }
 .chip.find:hover { border-color: var(--accent); }
 .bt-for { white-space: nowrap; }
+
+/* 설정 옮기기 */
+.wl-xfer { float: right; display: inline-flex; gap: 4px; }
+.xfer-box { margin: 4px 0 10px; padding: 10px; border-radius: 12px; background: var(--soft); }
+.xfer-box textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 8px; padding: 6px; background: var(--card); color: var(--text); resize: vertical; word-break: break-all; }
+.xfer-actions { display: flex; gap: 6px; margin-top: 6px; }
+.xfer-actions .ghost { margin-left: auto; }
