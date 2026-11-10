@@ -444,10 +444,20 @@
     return { cls: 'none', text: '오늘은 신호 없음', short: '' };
   }
 
-  // 고르기 (이 브라우저에 저장): 매매 신호는 한 번에 하나, 차트 지표는 여러 개 켜고 끄기
+  // 고르기 (이 브라우저에 저장): 매매 신호·차트 지표 모두 여러 개 켜고 끄기.
+  // 신호는 켠 순서대로 stratOn 에 두고, 마지막에 켠 것(stratSel)이 '기준 신호': 제목·성적·손절익절·찾기·목록에 쓰임
   const lsGet = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; } catch (e) { return def; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 저장 불가 */ } };
   let stratSel = lsGet('dcf-strategy-id', null);
+  const STRAT_ON_KEY = 'dcf-strategy-on';
+  let stratOn = lsGet(STRAT_ON_KEY, null);
+  if (!Array.isArray(stratOn)) stratOn = stratSel ? [stratSel] : [];
+  // 기준 신호로 만들기 (다른 켜진 신호는 그대로 둠)
+  function setMain(sid) {
+    stratOn = stratOn.filter(x => x !== sid).concat(sid);
+    stratSel = sid;
+    lsSet('dcf-strategy-id', stratSel); lsSet(STRAT_ON_KEY, stratOn);
+  }
   let indOff = lsGet('dcf-indicators-off', []);
   // 종목별로 손절·익절을 적용할 때 쓴 신호 (그 종목을 열면 이 신호로 먼저 보여 줌)
   const TSTRAT_KEY = 'dcf-ticker-strat';
@@ -473,13 +483,17 @@
   function useTickerStrat(t) {
     const sid = t && tstrat[t];
     if (!sid || sid === stratSel || !STRATS.some(x => x.id === sid)) return false;
-    stratSel = sid; lsSet('dcf-strategy-id', stratSel); renderPickers();
+    setMain(sid); renderPickers();
     return true;
   }
   const activeStrats = () => {
-    if (!STRATS.some(s => s.id === stratSel)) stratSel = STRATS[0] && STRATS[0].id;
+    stratOn = stratOn.filter(id => STRATS.some(s => s.id === id));
+    if (!STRATS.some(s => s.id === stratSel)) stratSel = stratOn[stratOn.length - 1] || (STRATS[0] && STRATS[0].id);
+    if (stratSel && stratOn[stratOn.length - 1] !== stratSel) stratOn = stratOn.filter(x => x !== stratSel).concat(stratSel);
     return STRATS.filter(s => s.id === stratSel);
   };
+  // 켜 둔 신호 전부 (기준 신호가 마지막 = 차트에서 맨 위에 그려짐)
+  const onStrats = () => { activeStrats(); return stratOn.map(id => STRATS.find(s => s.id === id)).filter(Boolean); };
   const activeInds = () => INDS.filter(i => !indOff.includes(i.id));
   let pickRates = {}; // 지금 종목의 전략별 승률 (신호 버튼에 표시)
   function renderPickers() {
@@ -487,7 +501,8 @@
     $$('.strat-pick').forEach(box => {
       box.innerHTML = STRATS.map(s => {
         const st = pickRates[s.id];
-        return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
+        const on = stratOn.includes(s.id), main = s.id === stratSel && stratOn.length > 1;
+        return `<button type="button" class="chip ${on ? 'on' : ''} ${main ? 'main' : ''}" data-sid="${esc(s.id)}" title="${esc((s.desc || '') + (main ? '\n기준 신호: 제목·성적·손절익절은 이 신호 기준' : '') + '\n누르면 켜고 끕니다. 마지막에 켠 신호가 기준이 됩니다.')}" style="--c:${s.color}"><i></i>${esc(s.name)}${main ? '<span class="chip-main">기준</span>' : ''}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
       }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">가리기·삭제</button>';
     });
     $$('.ind-pick').forEach(box => {
@@ -599,10 +614,15 @@
       return;
     }
     if (b) {
-      if (b.dataset.sid === stratSel) return;
-      stratSel = b.dataset.sid;
-      lsSet('dcf-strategy-id', stratSel);
-      searchRefresh(); // 열려 있으면 새 신호로 다시 계산
+      // 누르면 켜고 끄기. 새로 켠 신호가 기준 신호. 기준 신호를 끄면 그 전에 켠 신호가 기준. 하나는 꼭 켜 둠
+      const sid = b.dataset.sid;
+      if (stratOn.includes(sid)) {
+        if (stratOn.length <= 1) return;
+        stratOn = stratOn.filter(x => x !== sid);
+        if (sid === stratSel) stratSel = stratOn[stratOn.length - 1];
+        lsSet('dcf-strategy-id', stratSel); lsSet(STRAT_ON_KEY, stratOn);
+      } else setMain(sid);
+      searchRefresh(); // 열려 있으면 기준 신호로 다시 계산
     } else if (ib) {
       const id = ib.dataset.iid;
       indOff = indOff.includes(id) ? indOff.filter(x => x !== id) : [...indOff, id];
@@ -1397,7 +1417,7 @@
       const ex = extOf(r.d), ea = earnOf(r.d);
       $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)}${ex ? ` · <span class="ext-quote">${ex.label} ${fmtP(ex.price)} ${fmtR(ex.chg)}</span>` : ''}${ea ? ` · <span class="earn-tag ${ea.near ? 'near' : ''}">${ea.near ? '⚠ ' : ''}${esc(ea.text)}</span>` : ''} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span>` +
         (ss ? ` · <b>승률 ${Math.round(ss.rate * 100)}%</b> <span class="muted small">(거래 ${ss.n}번 · 누적 ${(ss.total * 100).toFixed(0)}%)</span>` : '') + ` <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
-      const sets = s0 && !sim0.error ? [{ strat: s0, sim: sim0 }] : [];
+      const sets = onStrats().map(x => ({ strat: x, sim: simOf(r, x) })).filter(x => !x.sim.error);
       modalChart = window.SigChart.draw($('#modal-sig'), r.d, sets, activeInds().map(ind => ({ ind, out: indOf(r, ind) })).filter(x => !x.out.error), { bars: 160, ext: ex, earn: ea });
       renderSigInfo(r);
     } catch (e) {
@@ -1633,7 +1653,7 @@
   // ---------- 브라우저 사이에 맞추는 설정 목록 (자동 동기화가 씀) ----------
   // 옮기는 것: 관심·보유 종목, 순서, 테마, 펼친 묶음, 고른 신호·지표, 추가·가린·삭제한 신호, 종목별 손절·익절, 성적 기간.
   // 옮기지 않는 것: Claude API 키(비밀), 목록 칸 크기(화면마다 다름), DCF 계산 칸.
-  const XFER_KEYS = ['dcf-watchlist', 'dcf-holdings', 'dcf-themes', 'dcf-theme-pick', 'dcf-wl-open', 'dcf-strategy-id', 'dcf-indicators-off',
+  const XFER_KEYS = ['dcf-watchlist', 'dcf-holdings', 'dcf-themes', 'dcf-theme-pick', 'dcf-wl-open', 'dcf-strategy-id', 'dcf-strategy-on', 'dcf-indicators-off',
     'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-ticker-strat', 'dcf-wl-mode', 'dcf-backtest'];
   function xferSnapshot() {
     const o = {};
@@ -1880,7 +1900,7 @@
     customs.push(draft);
     lsSet(CUSTOM_KEY, customs);
     mountCustoms();
-    if (draft.kind === 'strategy') { stratSel = draft.id; lsSet('dcf-strategy-id', stratSel); } else { indOff = indOff.filter(x => x !== draft.id); lsSet('dcf-indicators-off', indOff); }
+    if (draft.kind === 'strategy') { setMain(draft.id); } else { indOff = indOff.filter(x => x !== draft.id); lsSet('dcf-indicators-off', indOff); }
     draft = null;
     $('#add-code').value = '';
     $('#add-name').value = '';

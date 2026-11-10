@@ -253,6 +253,8 @@ body.modal-open { overflow: hidden; }
 .pick-label { flex: none; width: 28px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .ind-pick .chip { padding: 4px 10px; font-size: 12px; }
 .chip-rate { font-size: 11px; font-weight: 700; color: var(--sub); background: var(--soft); border-radius: 999px; padding: 1px 7px; margin-left: 2px; }
+.chip.main { box-shadow: 0 0 0 1.5px var(--c); font-weight: 700; }
+.chip-main { font-size: 10px; font-weight: 700; color: #fff; background: var(--c); border-radius: 6px; padding: 1px 5px; margin-left: 4px; }
 .chip.on .chip-rate { color: var(--c); background: var(--card); }
 .bt-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .bt-years { display: inline-flex; gap: 6px; }
