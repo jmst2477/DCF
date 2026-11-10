@@ -158,7 +158,20 @@ export default async function handler(req, res) {
       const st = String(q.state || "");
       if (!/^[a-f0-9]{32}$/.test(st) || !(await redis("GET", K.state + st))) return page(res, false, "연결 요청이 만료됐습니다. 사이트에서 다시 눌러 주세요.");
       await redis("DEL", K.state + st);
-      const t = saveTok({ origin: originOf(req) }, await kakaoToken({ grant_type: "authorization_code", redirect_uri: redirectOf(req), code: String(q.code) }));
+      let got;
+      try {
+        got = await kakaoToken({ grant_type: "authorization_code", redirect_uri: redirectOf(req), code: String(q.code) });
+      } catch (e) {
+        const m = String(e.message || e);
+        // 흔한 원인을 쉬운 말로 (KOE010 = 클라이언트 시크릿, KOE006 = 리다이렉트 URI, KOE101 = 앱 키)
+        const hint = /client credentials|KOE010/i.test(m)
+          ? (SECRET ? "Vercel의 KAKAO_CLIENT_SECRET 값이 카카오 앱의 클라이언트 시크릿과 다릅니다." : "카카오 앱에 클라이언트 시크릿이 켜져 있습니다. 그 코드를 Vercel 환경 변수 KAKAO_CLIENT_SECRET 에 넣고 다시 배포해 주세요.")
+          : /redirect/i.test(m) ? `카카오 앱의 리다이렉트 URI에 ${redirectOf(req)} 를 그대로 등록해 주세요.`
+          : /client_id|invalid_client/i.test(m) ? "KAKAO_REST_API_KEY 값이 카카오 앱의 REST API 키와 다릅니다."
+          : "";
+        return page(res, false, "카카오 연결에 실패했습니다: " + m.replace(/[<>&]/g, "") + (hint ? "<br><b>" + hint.replace(/[<>&]/g, "") + "</b>" : ""));
+      }
+      const t = saveTok({ origin: originOf(req) }, got);
       await redis("SET", K.tok, JSON.stringify(t));
       try {
         await sendMemo("카카오톡 알림이 연결됐습니다. 매일 아침(미국 장 마감 뒤) 적용한 신호가 새로 나온 종목이 있으면 여기로 알려 드립니다.");
