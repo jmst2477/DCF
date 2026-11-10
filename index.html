@@ -136,7 +136,13 @@
   <div class="modal-box" role="dialog" aria-modal="true" aria-label="차트">
     <aside class="wl">
       <form id="wl-form" class="wl-form"><input id="wl-input" placeholder="예: GEV BE CEG" title="티커를 넣으세요. 여러 개는 띄어 쓰거나 쉼표로 한 번에 추가됩니다." autocomplete="off" autocapitalize="characters"><select id="wl-kind" title="보유 / 관심"><option value="watch">관심</option><option value="hold">보유</option></select><button type="submit" class="mini">추가</button></form>
-      <p class="wl-title muted small">내 종목 <span class="muted">(이 브라우저에 저장)</span></p>
+      <p class="wl-title muted small">내 종목 <span class="muted">(이 브라우저에 저장)</span>
+        <span class="wl-xfer"><button type="button" id="xfer-out" class="ghost mini" title="종목·테마·신호·손절익절 설정을 코드로 복사해 다른 브라우저로 옮깁니다">내보내기</button><button type="button" id="xfer-in" class="ghost mini" title="다른 브라우저에서 복사한 코드를 붙여 넣어 똑같이 맞춥니다">가져오기</button></span></p>
+      <div id="xfer-box" class="xfer-box" hidden>
+        <p id="xfer-msg" class="small"></p>
+        <textarea id="xfer-code" rows="4" spellcheck="false" autocomplete="off"></textarea>
+        <div class="xfer-actions"><button type="button" id="xfer-copy" class="mini">복사</button><button type="button" id="xfer-apply" class="mini">이 코드로 맞추기</button><button type="button" id="xfer-close" class="ghost mini">닫기</button></div>
+      </div>
       <div id="wl-themes" class="wl-themes" hidden></div>
       <label class="wl-only small"><input type="checkbox" id="wl-only"> 오늘 매수·청산 신호 종목만</label>
       <ul id="wl-list" class="wl-list"></ul>
