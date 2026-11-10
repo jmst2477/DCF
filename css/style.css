@@ -368,3 +368,4 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .bt-search table td, .bt-search table th { white-space: nowrap; }
 .chip.find { white-space: nowrap; flex-shrink: 0; border-style: dashed; color: var(--accent); background: transparent; }
 .chip.find:hover { border-color: var(--accent); }
+.bt-for { white-space: nowrap; }
