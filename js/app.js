@@ -316,13 +316,16 @@
   const BT_KEY = 'dcf-backtest';
   const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [1, 3, 5].includes(o.years) ? o.years : 5 }; } catch (e) { return { years: 5 }; } })();
   const saveBt = () => lsSet(BT_KEY, bt);
-  // 손절·익절은 종목마다 따로 저장 (예: AEHR은 -10%/+30%, GEV는 안 씀). 없으면 안 씀
+  // 손절·익절은 종목+신호마다 따로 저장: { AEHR: { 'stoch-x': {sl:10, tp:30} } }. 없으면 안 씀
+  // (예전 형식 { AEHR: {sl, tp} } 은 아래 migrateSltp 에서 그 종목의 적용 신호 칸으로 옮김)
   const SLTP_KEY = 'dcf-sltp';
   let sltp = (() => { try { const o = JSON.parse(localStorage.getItem(SLTP_KEY)); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
-  const sltpOf = t => { const o = (t && sltp[t]) || {}; return { sl: o.sl > 0 ? o.sl : null, tp: o.tp > 0 ? o.tp : null }; };
-  function setSltp(t, rule) {
-    if (!t) return;
-    if (rule.sl || rule.tp) sltp[t] = { sl: rule.sl || null, tp: rule.tp || null }; else delete sltp[t];
+  const sltpOf = (t, sid) => { const o = (t && sid && sltp[t] && sltp[t][sid]) || {}; return { sl: o.sl > 0 ? o.sl : null, tp: o.tp > 0 ? o.tp : null }; };
+  function setSltp(t, sid, rule) {
+    if (!t || !sid) return;
+    const m = sltp[t] || {};
+    if (rule.sl || rule.tp) m[sid] = { sl: rule.sl || null, tp: rule.tp || null }; else delete m[sid];
+    if (Object.keys(m).length) sltp[t] = m; else delete sltp[t];
     lsSet(SLTP_KEY, sltp);
   }
   const simKey = (s, rule) => `${s.id}|${rule.sl || ''}|${rule.tp || ''}`;
@@ -359,16 +362,16 @@
     return { out, marks, trades, pos, entry, fee, d };
   }
   // 지난 성적 (설정한 기간 안에 산 거래만): 거래 수, 승률, 거래당 평균, 누적, 최대 낙폭, 같은 기간 그냥 들고 있었을 때
-  function btStart(d) {
+  function btStart(d, years) {
     const L = d.close.length - 1, cut = new Date(d.time[L]);
-    cut.setFullYear(cut.getFullYear() - bt.years);
+    cut.setFullYear(cut.getFullYear() - (years || bt.years));
     const c = cut.toISOString().slice(0, 10);
     const k = d.time.findIndex(t => t >= c);
     return k < 0 ? 0 : k;
   }
-  function statsOf(sim) {
+  function statsOf(sim, years) {
     if (!sim || sim.error || !sim.d) return null;
-    const d = sim.d, L = d.close.length - 1, s0 = btStart(d);
+    const d = sim.d, L = d.close.length - 1, s0 = btStart(d, years);
     const tr = (sim.trades || []).filter(x => x.from.i >= s0);
     if (!tr.length) return null;
     const wins = tr.filter(x => x.ret > 0).length;
@@ -406,7 +409,7 @@
     return sigCache[t];
   }
   function simOf(r, s) {
-    const rule = sltpOf(r.t), k = simKey(s, rule);
+    const rule = sltpOf(r.t, s.id), k = simKey(s, rule);
     if (!(k in r.sims)) { try { r.sims[k] = simulate(r.d, s, rule); } catch (e) { r.sims[k] = { error: e.message || String(e) }; } }
     return r.sims[k];
   }
@@ -451,6 +454,21 @@
   let tstrat = lsGet(TSTRAT_KEY, {});
   if (!tstrat || typeof tstrat !== 'object') tstrat = {};
   function setTickerStrat(t, sid) { if (!t || !sid) return; tstrat[t] = sid; lsSet(TSTRAT_KEY, tstrat); }
+  (function migrateSltp() {
+    let ch = false;
+    Object.keys(sltp).forEach(t => {
+      const o = sltp[t];
+      if (o && typeof o === 'object' && ('sl' in o || 'tp' in o)) {
+        const sid = tstrat[t] || stratSel || (STRATS[0] && STRATS[0].id);
+        sltp[t] = sid && (o.sl > 0 || o.tp > 0) ? { [sid]: { sl: o.sl > 0 ? o.sl : null, tp: o.tp > 0 ? o.tp : null } } : undefined;
+        if (!sltp[t]) delete sltp[t];
+        ch = true;
+      }
+    });
+    if (ch) lsSet(SLTP_KEY, sltp);
+  })();
+  // 종목을 빼면 그 종목의 손절·익절과 적용 신호 기록도 지움
+  function forgetTicker(t) { delete sltp[t]; delete tstrat[t]; lsSet(SLTP_KEY, sltp); lsSet(TSTRAT_KEY, tstrat); }
   // 종목을 열 때: 저장된 신호가 있고 지금 고른 신호와 다르면 그 신호로 바꿈. 바뀌었으면 true
   function useTickerStrat(t) {
     const sid = t && tstrat[t];
@@ -483,11 +501,13 @@
     $$('.bt-pick .chip[data-years]').forEach(b => { b.classList.toggle('on', +b.dataset.years === bt.years); b.style.setProperty('--c', 'var(--accent)'); });
     // 처음 그릴 때는 종목 변수가 아직 없을 수 있음
     let mt = null; try { mt = modalTicker; } catch (e) { mt = null; }
-    const rule = sltpOf(mt);
+    const rule = sltpOf(mt, stratSel);
     if (document.activeElement !== $('#bt-sl')) $('#bt-sl').value = rule.sl || '';
     if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = rule.tp || '';
-    const ts = mt && tstrat[mt] && STRATS.find(x => x.id === tstrat[mt]);
-    $('#bt-for').textContent = mt ? mt + ' 전용' + (ts ? ' · ' + ts.name : '') : '';
+    // 손절·익절 칸은 "이 종목 + 지금 신호" 값. 종목을 열 때 먼저 켜지는 신호(적용 신호)는 ★로 표시
+    const cs = STRATS.find(x => x.id === stratSel);
+    $('#bt-for').textContent = mt && cs ? `${mt} · ${cs.short || cs.name} 전용${tstrat[mt] === cs.id ? ' ★' : ''}` : '';
+    $('#bt-for').title = '손절·익절은 종목과 신호마다 따로 저장됩니다. ★ = 이 종목을 열면 먼저 켜지는 신호';
   }
   function btChanged() {
     saveBt();
@@ -498,9 +518,9 @@
   $$('.bt-pick .chip[data-years]').forEach(b => b.addEventListener('click', () => { bt.years = +b.dataset.years; btChanged(); }));
   ['sl', 'tp'].forEach(k => $('#bt-' + k).addEventListener('change', e => {
     const v = parseFloat(e.target.value);
-    const rule = sltpOf(modalTicker);
+    const rule = sltpOf(modalTicker, stratSel);
     rule[k] = v > 0 && v < 100 ? v : null;
-    setSltp(modalTicker, rule);
+    setSltp(modalTicker, stratSel, rule);
     setTickerStrat(modalTicker, stratSel);
     btChanged();
   }));
@@ -520,11 +540,11 @@
     let r;
     try { r = await getSig(t); } catch (e) { if (run === searchRun) box.innerHTML = '<p class="neg small">주가를 불러오지 못했습니다.</p>'; return; }
     if (run !== searchRun || box.hidden) return; // 그사이 다른 조건으로 다시 계산 중이거나 닫힘
-    const keep = sltpOf(t), rows = [];
+    const keep = sltpOf(t, s.id), rows = [];
     try {
       for (const sl of SL_GRID) for (const tp of TP_GRID) {
-        const st = statsOf(simulate(r.d, s, { sl, tp }));
-        if (st) rows.push({ sl, tp, st });
+        const sim = simulate(r.d, s, { sl, tp }), st = statsOf(sim);
+        if (st) rows.push({ sl, tp, st, sim });
       }
     } catch (e) { box.innerHTML = `<p class="neg small">계산 오류: ${esc(e.message || e)}</p>`; return; }
     if (!rows.length) { box.innerHTML = `<p class="muted small">${esc(t)}: 최근 ${bt.years}년 동안 이 신호의 거래가 없습니다.</p>`; return; }
@@ -543,11 +563,15 @@
     if (base && !show.some(y => y[0] === base)) show.push([base, '손절·익절 안 씀']);
     if (cur && !show.some(y => y[0] === cur)) show.push([cur, '지금 설정']);
     const pr = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
+    // 과최적화 확인: 기간이 3·5년이면 같은 조합이 최근 1년에도 통했는지 같이 보여 줌
+    const recent = bt.years > 1;
+    const rTxt = x => { const q = statsOf(x.sim, 1); return q ? `${pr(q.total)} <span class="muted small">${q.n}번</span>` : '<span class="muted small">거래 없음</span>'; };
+    const base1 = recent && base ? statsOf(base.sim, 1) : null;
     box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · 최근 ${bt.years}년</b> <span class="muted small">손절 ${SL_GRID.length} × 익절 ${TP_GRID.length} = ${SL_GRID.length * TP_GRID.length}가지 조합 계산</span><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>
-      <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th>최대 낙폭</th><th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
-        <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${pr(x.st.mdd)}</td>
+      <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th>최대 낙폭</th>${recent ? '<th title="같은 조합으로 최근 1년만 따로 계산">최근 1년</th>' : ''}<th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
+        <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${pr(x.st.mdd)}</td>${recent ? `<td>${rTxt(x)}</td>` : ''}
         <td class="muted small">${tag}</td><td><button type="button" class="ghost mini" data-bt-apply="${x.sl || ''},${x.tp || ''}">적용</button></td></tr>`).join('')}</tbody></table></div>
-      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)}. 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
+      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)}. 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''}${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
   }
   $('#bt-find').addEventListener('click', findSlTp);
   $('#bt-search').addEventListener('click', e => {
@@ -555,7 +579,7 @@
     const a = e.target.closest('[data-bt-apply]');
     if (!a) return;
     const [sl, tp] = a.dataset.btApply.split(',').map(v => parseFloat(v) || null);
-    setSltp($('#bt-search').dataset.t || modalTicker, { sl, tp });
+    setSltp($('#bt-search').dataset.t || modalTicker, $('#bt-search').dataset.sid || stratSel, { sl, tp });
     setTickerStrat($('#bt-search').dataset.t || modalTicker, $('#bt-search').dataset.sid || stratSel);
     btChanged(); // 결과 칸은 열린 채로 '지금 설정'이 바뀐 걸 다시 보여 줌
   });
@@ -602,7 +626,7 @@
     return `<p class="earn-warn small">⚠ ${esc(ea.text)}: 실적 발표 전후로는 주가가 크게 튀어 신호가 잘 안 맞습니다. ${st.cls === 'buy' ? '발표 뒤에 들어가는 것도 방법입니다.' : '발표 전에 정리할지 생각해 보세요.'}</p>`;
   }
   const btFromTxt = d => d.time[btStart(d)];
-  const btRuleTxt = ss => { const r = sltpOf(modalTicker); return r.sl || r.tp ? ` · ${[r.sl ? `손절 -${r.sl}%` : '', r.tp ? `익절 +${r.tp}%` : ''].filter(Boolean).join(' · ')}${ss && ss.stops ? ` (${ss.stops}번 발동)` : ''}` : ''; };
+  const btRuleTxt = ss => { const r = sltpOf(modalTicker, stratSel); return r.sl || r.tp ? ` · ${[r.sl ? `손절 -${r.sl}%` : '', r.tp ? `익절 +${r.tp}%` : ''].filter(Boolean).join(' · ')}${ss && ss.stops ? ` (${ss.stops}번 발동)` : ''}` : ''; };
   // 차트 아래 "신호 자세히": 고른 신호, 모든 전략 승률 비교, 켜 둔 지표 상태, 최근 신호
   function renderSigInfo(r) {
     const d = r.d, n = d.close.length, L = n - 1, last = d.close[L];
@@ -1382,7 +1406,19 @@
   }
   const GRP_KEY = 'dcf-wl-open';
   let grpOpen = lsGet(GRP_KEY, []);
+  // 목록 기준: 'ticker' = 종목마다 손절·익절을 적용한 신호 (없으면 지금 고른 신호), 'current' = 모두 지금 고른 신호
+  const WL_MODE_KEY = 'dcf-wl-mode';
+  let wlMode = lsGet(WL_MODE_KEY, 'ticker') === 'current' ? 'current' : 'ticker';
+  function wlStratFor(t) {
+    const cur = activeStrats()[0];
+    if (wlMode !== 'ticker') return cur;
+    return STRATS.find(x => x.id === tstrat[t]) || cur;
+  }
+  function renderWlMode() {
+    $$('#wl-mode [data-wl-mode]').forEach(b => b.classList.toggle('on', b.dataset.wlMode === wlMode));
+  }
   function renderWatch() {
+    renderWlMode();
     const list = $('#wl-list');
     const cur = (state.ticker || '').trim().toUpperCase();
     renderThemes();
@@ -1413,14 +1449,14 @@
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
       if (!el) return;
-      const s0 = activeStrats()[0], sim0 = s0 && simOf(r, s0), st = sigState(r.d, sim0);
+      const s0 = wlStratFor(t), sim0 = s0 && simOf(r, s0), st = sigState(r.d, sim0);
       const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
       const ea = earnOf(r.d);
       el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}${ea && ea.near ? ` <span class="sig-pill earn" title="${esc(ea.text)}">실적 ${ea.dday ? 'D-' + ea.dday : '오늘'}</span>` : ''}`;
       const rt = list.querySelector(`.wl-rate[data-r="${CSS.escape(t)}"]`);
       if (rt && sim0 && !sim0.error) {
-        const ru = sltpOf(t);
-        rt.textContent = rateTxt(statsOf(sim0)) + (ru.sl || ru.tp ? ` · ${[ru.sl ? '-' + ru.sl + '%' : '', ru.tp ? '+' + ru.tp + '%' : ''].filter(Boolean).join('/')}` : '');
+        const ru = sltpOf(t, s0.id), other = s0.id !== stratSel;
+        rt.textContent = (other ? (s0.short || s0.name) + ' · ' : '') + rateTxt(statsOf(sim0)) + (ru.sl || ru.tp ? ` · ${[ru.sl ? '-' + ru.sl + '%' : '', ru.tp ? '+' + ru.tp + '%' : ''].filter(Boolean).join('/')}` : '');
       }
       const li = el.closest('li');
       if (li) li.dataset.sig = st.cls;
@@ -1473,6 +1509,11 @@
     $('#wl-none').hidden = !on || !!$('#wl-list li[data-sig="buy"], #wl-list li[data-sig="sell"]');
   }
   $('#wl-only').addEventListener('change', updateOnly);
+  $('#wl-mode').addEventListener('click', e => {
+    const b = e.target.closest('[data-wl-mode]');
+    if (!b || b.dataset.wlMode === wlMode) return;
+    wlMode = b.dataset.wlMode; lsSet(WL_MODE_KEY, wlMode); renderWatch();
+  });
   $('#wl-themes').addEventListener('click', e => {
     const c = e.target.closest('[data-theme-pick]');
     if (!c) return;
@@ -1499,7 +1540,7 @@
       themes[t] = name; // 비우면 '' (자동 테마도 다시 붙이지 않음)
       saveThemes(); renderWatch(); return;
     }
-    if (del) { watch = watch.filter(x => x !== del.dataset.del); holds = holds.filter(x => x !== del.dataset.del); delete themes[del.dataset.del]; saveWl(watch); saveHolds(); saveThemes(); renderWatch(); return; }
+    if (del) { watch = watch.filter(x => x !== del.dataset.del); holds = holds.filter(x => x !== del.dataset.del); delete themes[del.dataset.del]; forgetTicker(del.dataset.del); saveWl(watch); saveHolds(); saveThemes(); renderWatch(); return; }
     if (kind) { const t = kind.dataset.kind; holds = holds.includes(t) ? holds.filter(x => x !== t) : [...holds, t]; saveHolds(); renderWatch(); return; }
     if (add) { addWatch(add.dataset.add); renderWatch(); return; }
     if (pick) showModalTicker(pick.closest('li').dataset.t);
@@ -1593,7 +1634,7 @@
   // 옮기는 것: 관심·보유 종목, 순서, 테마, 펼친 묶음, 고른 신호·지표, 추가·가린·삭제한 신호, 종목별 손절·익절, 성적 기간.
   // 옮기지 않는 것: Claude API 키(비밀), 목록 칸 크기(화면마다 다름), DCF 계산 칸.
   const XFER_KEYS = ['dcf-watchlist', 'dcf-holdings', 'dcf-themes', 'dcf-theme-pick', 'dcf-wl-open', 'dcf-strategy-id', 'dcf-indicators-off',
-    'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-ticker-strat', 'dcf-backtest'];
+    'dcf-custom-items', 'dcf-hidden-items', 'dcf-deleted-items', 'dcf-sltp', 'dcf-ticker-strat', 'dcf-wl-mode', 'dcf-backtest'];
   function xferSnapshot() {
     const o = {};
     XFER_KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v != null) o[k] = JSON.parse(v); } catch (e) { /* 깨진 값은 건너뜀 */ } });
@@ -1808,7 +1849,7 @@
     try {
       const obj = toItem(item), notes = [];
       if (kind === 'strategy') {
-        const sim = simulate(r.d, obj, sltpOf(t)), o = sim.out, ss = statsOf(sim);
+        const sim = simulate(r.d, obj, sltpOf(t, obj.id)), o = sim.out, ss = statsOf(sim);
         item.desc = `매수: ${o.buyText || '-'}${o.exitText ? ` · 청산: ${o.exitText}` : ''}`;
         notes.push(...(o.notes || []));
         html = `<p>${esc(item.desc)}</p><p>${esc(t)} ${r.d.time[0]} 이후로 시험: 매수 신호 ${o.buy.filter(Boolean).length}번 · 거래 ${ss ? ss.n : 0}번` +

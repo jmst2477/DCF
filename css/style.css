@@ -311,6 +311,8 @@ body.modal-open { overflow: hidden; }
 .strat-desc { margin: 4px 0 0; }
 .strat-row .sig-last { margin: 6px 0 2px; }
 .strat-name { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 13px; }
+.wl-mode { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 0 2px 6px; }
+.wl-mode .chip { padding: 3px 9px; font-size: 12px; }
 .wl-only { flex-direction: row; align-items: center; gap: 6px; margin: 0 2px 6px; color: var(--sub); }
 .wl-list.only li:not([data-sig="buy"]):not([data-sig="sell"]):not(.wl-sec) { display: none; }
 .modal-info { border-top: 1px solid var(--line); padding: 8px 16px; flex: none; }
