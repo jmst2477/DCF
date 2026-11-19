@@ -627,6 +627,46 @@
       <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)} (1,000만원 → ${won(base ? base.st.hold : rows[0].st.hold)}). '1,000만원이면'은 처음에 1,000만원을 넣고 살 때마다 가진 돈을 전부 넣었다고 본 금액입니다 (수수료 포함, 세금 제외). 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''} 거래 ${MIN_TRADES}번 이상, 승률 ${Math.round(MIN_RATE * 100)}% 이상인 조합만 보여 줍니다.</p>`;
   }
   $('#bt-find').addEventListener('click', findSlTp);
+  // "여러 종목 풀기": 손절·익절이나 ★(적용 신호)가 저장된 종목을 골라 한꺼번에 지움 (전체 선택 가능)
+  const sName = id => { const x = STRATS.find(s => s.id === id); return x ? x.short || x.name : id; };
+  function bulkRender(note) {
+    const box = $('#bt-bulk');
+    const ts = [...new Set(Object.keys(sltp).concat(Object.keys(tstrat)))];
+    const order = t => { const i = watch.indexOf(t); return i < 0 ? 1e9 : i; };
+    ts.sort((a, b) => order(a) - order(b) || a.localeCompare(b));
+    const head = `<div class="bt-search-head"><b>손절·익절 여러 종목 풀기</b> <span class="muted small">${ts.length}종목에 저장돼 있음</span><button type="button" class="ghost mini" data-bulk-close>닫기 ✕</button></div>`;
+    if (!ts.length) { box.innerHTML = head + `<p class="muted small">손절·익절이나 ★가 저장된 종목이 없습니다.${note ? ' ' + note : ''}</p>`; return; }
+    const desc = t => {
+      const parts = Object.keys(sltp[t] || {}).map(sid => { const r = sltp[t][sid] || {}; return `${sName(sid)} ${[r.sl ? '-' + r.sl + '%' : '', r.tp ? '+' + r.tp + '%' : ''].filter(Boolean).join('/')}`; });
+      if (tstrat[t]) parts.push(`★ ${sName(tstrat[t])}`);
+      return parts.join(' · ');
+    };
+    box.innerHTML = head + `<label class="bulk-all"><input type="checkbox" data-bulk-all> 전체 선택</label>
+      <ul class="bulk-list">${ts.map(t => `<li><label><input type="checkbox" data-bulk-t="${esc(t)}"><b>${esc(t)}</b><span class="muted">${esc(desc(t))}</span></label></li>`).join('')}</ul>
+      <div class="bulk-actions"><button type="button" class="mini" data-bulk-go disabled>선택한 종목 풀기</button><span class="muted small" data-bulk-n>0종목 선택</span></div>` +
+      (note ? `<p class="small pos">${note}</p>` : '');
+  }
+  function bulkSync() {
+    const box = $('#bt-bulk'), all = [...box.querySelectorAll('[data-bulk-t]')], on = all.filter(c => c.checked);
+    const a = box.querySelector('[data-bulk-all]');
+    if (a) { a.checked = all.length > 0 && on.length === all.length; a.indeterminate = on.length > 0 && on.length < all.length; }
+    const go = box.querySelector('[data-bulk-go]'); if (go) go.disabled = !on.length;
+    const n = box.querySelector('[data-bulk-n]'); if (n) n.textContent = `${on.length}종목 선택`;
+  }
+  $('#bt-bulk-btn').addEventListener('click', () => { const b = $('#bt-bulk'); if (!b.hidden) { b.hidden = true; return; } b.hidden = false; bulkRender(); });
+  $('#bt-bulk').addEventListener('change', e => {
+    if (e.target.matches('[data-bulk-all]')) $('#bt-bulk').querySelectorAll('[data-bulk-t]').forEach(c => { c.checked = e.target.checked; });
+    bulkSync();
+  });
+  $('#bt-bulk').addEventListener('click', e => {
+    if (e.target.closest('[data-bulk-close]')) { $('#bt-bulk').hidden = true; return; }
+    if (!e.target.closest('[data-bulk-go]')) return;
+    const ts = [...$('#bt-bulk').querySelectorAll('[data-bulk-t]')].filter(c => c.checked).map(c => c.dataset.bulkT);
+    if (!ts.length || !confirm(`${ts.length}종목의 손절·익절과 ★를 모두 풀까요?\n${ts.join(', ')}`)) return;
+    ts.forEach(forgetTicker);
+    btChanged();
+    bulkRender(`${ts.length}종목을 풀었습니다.`);
+  });
   // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
   $('#bt-reset').addEventListener('click', () => {
     const t = modalTicker, cs = STRATS.find(x => x.id === stratSel);
