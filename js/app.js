@@ -1563,7 +1563,9 @@
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
       if (!el) return;
-      const s0 = wlStratFor(t), sim0 = s0 && simOf(r, s0), st = sigState(r.d, sim0);
+      const s0 = wlStratFor(t), sim0 = s0 && simOf(r, s0);
+      // 종목별 적용 신호 보기에서 ★(손절·익절 적용) 없는 종목은 매수·청산 표시를 안 함 (손절·익절을 찾은 뒤에 매매)
+      const st = wlMode === 'ticker' && !STRATS.some(x => x.id === tstrat[t]) ? { short: '', cls: 'none' } : sigState(r.d, sim0);
       const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
       const ea = earnOf(r.d);
       el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}${ea && ea.near ? ` <span class="sig-pill earn" title="${esc(ea.text)}">실적 ${ea.dday ? 'D-' + ea.dday : '오늘'}</span>` : ''}`;

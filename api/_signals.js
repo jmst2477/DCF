@@ -74,7 +74,8 @@ export function plan(data) {
   const perTicker = data["dcf-wl-mode"] !== "current";
   const holdings = arr(data["dcf-holdings"]);
   return arr(data["dcf-watchlist"]).filter(t => typeof t === "string" && t).map(t => {
-    const s = (perTicker && byId(tstrat[t])) || cur;
+    // 종목별 적용 신호 보기면 ★(손절·익절 적용) 있는 종목만 알림. ★ 없는 종목은 아직 매매 대상이 아님
+    const s = perTicker ? byId(tstrat[t]) : cur;
     const r = s && obj(obj(sltp[t])[s.id]);
     return { t, strat: s, rule: { sl: r && r.sl > 0 ? r.sl : null, tp: r && r.tp > 0 ? r.tp : null }, held: holdings.includes(t) };
   }).filter(x => x.strat);
