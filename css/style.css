@@ -372,6 +372,11 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .bt-search-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 6px; }
 .bt-search-head button { margin-left: auto; }
 .bt-search table td, .bt-search table th { white-space: nowrap; }
+.bulk-list { list-style: none; margin: 4px 0 8px; padding: 0; max-height: 260px; overflow-y: auto; }
+.bulk-list li { padding: 3px 0; }
+#bt-bulk .bulk-list label, #bt-bulk .bulk-all { display: flex; flex-direction: row; justify-content: flex-start; text-align: left; margin: 0; font-weight: 400; color: var(--text); align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.bulk-list .muted { font-size: 12px; }
+.bulk-actions { display: flex; align-items: center; gap: 8px; }
 .chip.find { white-space: nowrap; flex-shrink: 0; border-style: dashed; color: var(--accent); background: transparent; }
 .chip.find:hover { border-color: var(--accent); }
 .bt-for { white-space: nowrap; }
@@ -389,3 +394,4 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 #kakao-list:empty { display: none; }
 #kakao-list { margin-top: 6px; white-space: pre-line; }
 #sync-btn.err { color: var(--neg, #e53935); }
+#bt-bulk input[type="checkbox"] { width: auto; margin: 0; padding: 0; flex: none; }
