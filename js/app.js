@@ -594,7 +594,13 @@
     // 손절·익절이 한 번도 안 걸려 결과가 똑같은 조합은 하나만 (더 단순한 설정, 즉 '안 씀'에 가까운 쪽을 남김)
     const sig = x => [x.st.n, x.st.total.toFixed(6), x.st.mdd.toFixed(6)].join('|'), seen = new Set();
     const uniq = rows.filter(x => { const k = sig(x); if (seen.has(k)) return false; seen.add(k); return true; });
-    const ok = uniq.filter(x => x.st.n >= 3), pool = ok.length ? ok : uniq;
+    // 거래가 너무 적으면 운일 수 있어서, 순위에는 거래 5번 이상인 조합만 넣음
+    const MIN_TRADES = 5, pool = uniq.filter(x => x.st.n >= MIN_TRADES);
+    if (!pool.length) {
+      const most = Math.max(...uniq.map(x => x.st.n));
+      box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · ${esc(btName())}</b><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div><p class="muted small">거래가 ${MIN_TRADES}번 이상 나온 손절·익절 조합이 없습니다 (가장 많은 조합도 ${most}번). 기간을 더 길게 잡아 보세요.</p>`;
+      return;
+    }
     pool.sort((a, b) => b.st.total - a.st.total);
     const base = rows.find(x => !x.sl && !x.tp), cur = rows.find(x => x.sl === keep.sl && x.tp === keep.tp);
     const safest = pool.slice().sort((a, b) => b.st.mdd - a.st.mdd || b.st.total - a.st.total)[0];
@@ -603,8 +609,8 @@
     const sh = show.find(y => y[0] === safest);
     if (sh) sh[1] = sh[1] ? sh[1] + ' · 낙폭 가장 작음' : '낙폭 가장 작음';
     else if (safest) show.push([safest, '낙폭 가장 작음']);
-    if (base && !show.some(y => y[0] === base)) show.push([base, '손절·익절 안 씀']);
-    if (cur && !show.some(y => y[0] === cur)) show.push([cur, '지금 설정']);
+    if (base && base.st.n >= MIN_TRADES && !show.some(y => y[0] === base)) show.push([base, '손절·익절 안 씀']);
+    if (cur && cur.st.n >= MIN_TRADES && !show.some(y => y[0] === cur)) show.push([cur, '지금 설정']);
     const pr = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
     // 과최적화 확인: 기간이 3·5년이면 같은 조합이 최근 1년에도 통했는지 같이 보여 줌
     const recent = bt.years > 1;
@@ -617,7 +623,7 @@
       <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="처음에 1,000만원을 넣고 살 때마다 전부 넣었다면 (수수료 포함)">1,000만원이면</th><th>최대 낙폭</th>${recent ? '<th title="같은 조합으로 최근 1년만 따로 계산">최근 1년</th>' : ''}<th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
         <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${mTxt(x.st.total)}</td><td>${pr(x.st.mdd)}</td>${recent ? `<td>${rTxt(x)}</td>` : ''}
         <td class="muted small">${tag}</td><td><button type="button" class="ghost mini" data-bt-apply="${x.sl || ''},${x.tp || ''}">적용</button></td></tr>`).join('')}</tbody></table></div>
-      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)} (1,000만원 → ${won(base ? base.st.hold : rows[0].st.hold)}). '1,000만원이면'은 처음에 1,000만원을 넣고 살 때마다 가진 돈을 전부 넣었다고 본 금액입니다 (수수료 포함, 세금 제외). 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''}${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
+      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)} (1,000만원 → ${won(base ? base.st.hold : rows[0].st.hold)}). '1,000만원이면'은 처음에 1,000만원을 넣고 살 때마다 가진 돈을 전부 넣었다고 본 금액입니다 (수수료 포함, 세금 제외). 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''} 순위(1위·낙폭 가장 작음)는 거래가 ${MIN_TRADES}번 이상인 조합만 비교했습니다.</p>`;
   }
   $('#bt-find').addEventListener('click', findSlTp);
   // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
