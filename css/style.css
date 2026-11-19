@@ -397,3 +397,4 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 #bt-bulk input[type="checkbox"] { width: auto; margin: 0; padding: 0; flex: none; }
 
 .sltp-tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 8px; font-size: 11px; font-weight: 600; color: #f04452; background: rgba(240, 68, 82, .12); }
+.bt-search button.applied, .bt-search button.applied:disabled { opacity: 1; cursor: default; color: #fff; background: #3182f6; border-color: #3182f6; white-space: nowrap; }
