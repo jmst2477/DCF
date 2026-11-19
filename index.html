@@ -164,7 +164,8 @@
         <div class="pick-row"><span class="pick-label">신호</span><div class="strat-pick"></div></div>
         <div class="pick-row"><span class="pick-label">지표</span><div class="ind-pick"></div></div>
         <div class="pick-row"><span class="pick-label">성적</span><div class="bt-pick">
-          <span class="bt-years"><button type="button" class="chip" data-years="1">최근 1년</button><button type="button" class="chip" data-years="3">3년</button><button type="button" class="chip" data-years="5">5년</button></span>
+          <span class="bt-years"><button type="button" class="chip" data-years="1">최근 1년</button><button type="button" class="chip" data-years="3">3년</button><button type="button" class="chip" data-years="5">5년</button><button type="button" class="chip" data-years="0" title="시작일과 끝날을 직접 정합니다">직접</button></span>
+          <span id="bt-range" class="bt-range" hidden><input id="bt-from" type="date" aria-label="시작일"> ~ <input id="bt-to" type="date" aria-label="끝날 (비우면 오늘)"></span>
           <label class="bt-in">손절 -<input id="bt-sl" type="number" inputmode="decimal" min="0" step="0.5" placeholder="안 씀">%</label>
           <label class="bt-in">익절 +<input id="bt-tp" type="number" inputmode="decimal" min="0" step="0.5" placeholder="안 씀">%</label>
           <span id="bt-for" class="muted small bt-for"></span>

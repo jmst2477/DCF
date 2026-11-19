@@ -259,6 +259,10 @@ body.modal-open { overflow: hidden; }
 .bt-pick .chip { padding: 4px 10px; font-size: 12px; }
 .bt-in { display: inline-flex; flex-direction: row; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--sub); }
 .bt-in input { width: 64px; padding: 4px 6px; font-size: 13px; margin: 0 2px; }
+.bt-range { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--sub); flex: none; }
+.bt-range[hidden] { display: none; }
+.bt-range input { padding: 3px 6px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+.money { white-space: nowrap; }
 .chip.info { color: var(--sub); background: var(--soft); border-color: transparent; }
 .chip.info.on { --c: var(--accent); color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .sig-about { margin: 12px 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--soft); }
