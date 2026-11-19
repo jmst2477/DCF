@@ -314,9 +314,11 @@
 
   // 성적 계산 설정: 기간(최근 몇 년), 손절·익절 % (비우면 안 씀). 모든 신호에 똑같이 적용
   const BT_KEY = 'dcf-backtest';
+  // 거래 수수료 (한 번 살 때, 한 번 팔 때 각각 %). 기본 0.25% = 신한투자증권 해외주식 온라인 기본 수수료. 이벤트·우대 요율이면 칸에서 바꿈
+  const FEE_DEF = 0.25;
   // years: 1·3·5 = 최근 몇 년, 0 = 직접 정한 기간 (from ~ to, to 가 비면 마지막 날까지)
   const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '' }; } catch (e) { return { years: 5, from: '', to: '' }; } })();
+  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '', fee: typeof o.fee === 'number' && o.fee >= 0 && o.fee <= 3 ? o.fee : FEE_DEF }; } catch (e) { return { years: 5, from: '', to: '', fee: FEE_DEF }; } })();
   const saveBt = () => lsSet(BT_KEY, bt);
   // 손절·익절은 종목+신호마다 따로 저장: { AEHR: { 'stoch-x': {sl:10, tp:30} } }. 없으면 안 씀
   // (예전 형식 { AEHR: {sl, tp} } 은 아래 migrateSltp 에서 그 종목의 적용 신호 칸으로 옮김)
@@ -330,14 +332,15 @@
     if (Object.keys(m).length) sltp[t] = m; else delete sltp[t];
     lsSet(SLTP_KEY, sltp);
   }
-  const simKey = (s, rule) => `${s.id}|${rule.sl || ''}|${rule.tp || ''}`;
+  const simKey = (s, rule) => `${s.id}|${rule.sl || ''}|${rule.tp || ''}|${bt.fee}`;
 
   // 트레이딩뷰 strategy와 같은 방식: 신호 봉 종가에서 판단 → 다음 봉 시가에 체결, 보유 중엔 매수 표시 안 함.
   // 손절·익절: 보유 중 그날 저가가 손절가 아래면 손절가(시가가 이미 아래면 시가)에, 고가가 익절가 위면 익절가에 판다. 같은 날 둘 다 닿으면 손절로 본다.
   function simulate(d, strat, rule) {
     rule = rule || { sl: null, tp: null };
     const out = strat.run(d, window.TA);
-    const n = d.close.length, fee = out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
+    // 사용자가 정한 수수료(증권사 실제 요율)를 신호 기본값보다 먼저 씀
+    const n = d.close.length, fee = bt.fee >= 0 ? bt.fee / 100 : out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
     if (!out || !Array.isArray(out.buy) || !Array.isArray(out.exit)) throw new Error('buy·exit 배열을 돌려주지 않았습니다.');
     const sl = rule.sl / 100, tp = rule.tp / 100;
     const marks = [], trades = [];
@@ -534,6 +537,7 @@
     const rule = sltpOf(mt, stratSel);
     if (document.activeElement !== $('#bt-sl')) $('#bt-sl').value = rule.sl || '';
     if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = rule.tp || '';
+    if (document.activeElement !== $('#bt-fee')) $('#bt-fee').value = bt.fee;
     // 손절·익절 칸은 "이 종목 + 지금 신호" 값. 종목을 열 때 먼저 켜지는 신호(적용 신호)는 ★로 표시
     const cs = STRATS.find(x => x.id === stratSel);
     $('#bt-for').textContent = mt && cs ? `${mt} · ${cs.short || cs.name} 전용${tstrat[mt] === cs.id ? ' ★' : ''}` : '';
@@ -559,6 +563,11 @@
     if (bt.from && bt.to && bt.from > bt.to) [bt.from, bt.to] = [bt.to, bt.from];
     btChanged();
   }));
+  $('#bt-fee').addEventListener('change', e => {
+    const v = parseFloat(e.target.value);
+    bt.fee = v >= 0 && v <= 3 ? v : FEE_DEF;
+    btChanged();
+  });
   ['sl', 'tp'].forEach(k => $('#bt-' + k).addEventListener('change', e => {
     const v = parseFloat(e.target.value);
     const rule = sltpOf(modalTicker, stratSel);
