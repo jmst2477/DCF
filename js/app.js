@@ -1558,7 +1558,7 @@
       const rt = list.querySelector(`.wl-rate[data-r="${CSS.escape(t)}"]`);
       if (rt && sim0 && !sim0.error) {
         const ru = sltpOf(t, s0.id), other = s0.id !== stratSel;
-        rt.innerHTML = esc((other ? (s0.short || s0.name) + ' · ' : '') + rateTxt(statsOf(sim0))) + (ru.sl || ru.tp ? ' <span class="sltp-tag">손익절 설정</span>' : '');
+        rt.innerHTML = esc((other ? (s0.short || s0.name) + ' · ' : '') + rateTxt(statsOf(sim0))) + (ru.sl || ru.tp || tstrat[t] === s0.id ? ' <span class="sltp-tag">손익절 설정</span>' : '');
       }
       const li = el.closest('li');
       if (li) li.dataset.sig = st.cls;
