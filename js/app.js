@@ -314,7 +314,9 @@
 
   // 성적 계산 설정: 기간(최근 몇 년), 손절·익절 % (비우면 안 씀). 모든 신호에 똑같이 적용
   const BT_KEY = 'dcf-backtest';
-  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [1, 3, 5].includes(o.years) ? o.years : 5 }; } catch (e) { return { years: 5 }; } })();
+  // years: 1·3·5 = 최근 몇 년, 0 = 직접 정한 기간 (from ~ to, to 가 비면 마지막 날까지)
+  const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '' }; } catch (e) { return { years: 5, from: '', to: '' }; } })();
   const saveBt = () => lsSet(BT_KEY, bt);
   // 손절·익절은 종목+신호마다 따로 저장: { AEHR: { 'stoch-x': {sl:10, tp:30} } }. 없으면 안 씀
   // (예전 형식 { AEHR: {sl, tp} } 은 아래 migrateSltp 에서 그 종목의 적용 신호 칸으로 옮김)
@@ -362,33 +364,56 @@
     return { out, marks, trades, pos, entry, fee, d };
   }
   // 지난 성적 (설정한 기간 안에 산 거래만): 거래 수, 승률, 거래당 평균, 누적, 최대 낙폭, 같은 기간 그냥 들고 있었을 때
-  function btStart(d, years) {
-    const L = d.close.length - 1, cut = new Date(d.time[L]);
-    cut.setFullYear(cut.getFullYear() - (years || bt.years));
-    const c = cut.toISOString().slice(0, 10);
-    const k = d.time.findIndex(t => t >= c);
-    return k < 0 ? 0 : k;
+  // 성적을 셀 봉 범위 [시작, 끝]. years 를 주면 최근 그 햇수, 아니면 고른 기간 (직접 정한 기간 포함)
+  function btRange(d, years) {
+    const L = d.close.length - 1;
+    const y = years || bt.years;
+    if (y) {
+      const cut = new Date(d.time[L]);
+      cut.setFullYear(cut.getFullYear() - y);
+      const c = cut.toISOString().slice(0, 10), k = d.time.findIndex(t => t >= c);
+      return [k < 0 ? 0 : k, L];
+    }
+    let s = bt.from ? d.time.findIndex(t => t >= bt.from) : 0;
+    if (s < 0) s = L;
+    let e = L;
+    if (bt.to) { e = -1; for (let i = L; i >= 0; i--) if (d.time[i] <= bt.to) { e = i; break; } }
+    if (e < s) e = s;
+    return [s, e];
   }
+  const btStart = (d, years) => btRange(d, years)[0];
+  // 화면에 쓰는 기간 이름: "2024-01-02 이후" 또는 "2024-01-02 ~ 2025-06-30"
+  function btSpanTxt(d) {
+    const [s, e] = btRange(d), L = d.close.length - 1;
+    return e < L ? `${d.time[s]} ~ ${d.time[e]}` : `${d.time[s]} 이후`;
+  }
+  // 문장 안에 넣을 때: "2024-01-02 이후" 또는 "2024-01-02 ~ 2025-06-30 동안"
+  const btDuring = d => { const t = btSpanTxt(d); return t.endsWith('이후') ? t : t + ' 동안'; };
+  const btName = () => (bt.years ? `최근 ${bt.years}년` : `${bt.from || '처음'} ~ ${bt.to || '오늘'}`);
+  // 지난 성적 (기간 안에 사서 기간 안에 판 거래): 거래 수, 승률, 거래당 평균, 누적, 최대 낙폭, 같은 기간 그냥 들고 있었을 때.
+  // 기간 끝에 아직 들고 있는 거래는 끝난 거래로 세지 않고 낙폭에만 넣음
   function statsOf(sim, years) {
     if (!sim || sim.error || !sim.d) return null;
-    const d = sim.d, L = d.close.length - 1, s0 = btStart(d, years);
-    const tr = (sim.trades || []).filter(x => x.from.i >= s0);
+    const d = sim.d, [s0, e0] = btRange(d, years);
+    const tr = (sim.trades || []).filter(x => x.from.i >= s0 && x.to.i <= e0);
     if (!tr.length) return null;
     const wins = tr.filter(x => x.ret > 0).length;
     // 최대 낙폭: 보유 중엔 매일 종가로 평가한 자산이 앞선 최고점에서 가장 많이 빠졌던 비율 (기간 끝까지 들고 있는 거래 포함)
     const legs = tr.map(x => ({ a: x.from.i, b: x.to.i, p: x.from.price, ret: x.ret }));
-    if (sim.pos && sim.entry && sim.entry.i >= s0) legs.push({ a: sim.entry.i, b: L + 1, p: sim.entry.price, ret: null });
+    const open = (sim.trades || []).find(x => x.from.i >= s0 && x.from.i <= e0 && x.to.i > e0) ||
+      (sim.pos && sim.entry && sim.entry.i >= s0 && sim.entry.i <= e0 ? { from: sim.entry } : null);
+    if (open) legs.push({ a: open.from.i, b: e0 + 1, p: open.from.price, ret: null });
     let eq = 1, peak = 1, mdd = 0;
     const mark = v => { peak = Math.max(peak, v); mdd = Math.min(mdd, v / peak - 1); };
     legs.forEach(g => {
-      for (let k = g.a; k < g.b && k <= L; k++) mark(eq * d.close[k] / g.p);
+      for (let k = g.a; k < g.b && k <= e0; k++) mark(eq * d.close[k] / g.p);
       if (g.ret != null) { eq *= 1 + g.ret; mark(eq); }
     });
     return {
       n: tr.length, wins, rate: wins / tr.length,
       avg: tr.reduce((a, x) => a + x.ret, 0) / tr.length,
       total: tr.reduce((a, x) => a * (1 + x.ret), 1) - 1,
-      mdd, hold: d.close[L] / d.open[s0] - 1, from: d.time[s0],
+      mdd, hold: d.close[e0] / d.open[s0] - 1, from: d.time[s0], to: d.time[e0],
       stops: tr.filter(x => x.reason).length,
     };
   }
@@ -499,6 +524,11 @@
   // 성적 줄: 기간 버튼과 손절·익절 칸
   function renderBt() {
     $$('.bt-pick .chip[data-years]').forEach(b => { b.classList.toggle('on', +b.dataset.years === bt.years); b.style.setProperty('--c', 'var(--accent)'); });
+    $('#bt-range').hidden = bt.years !== 0;
+    if (document.activeElement !== $('#bt-from')) $('#bt-from').value = bt.from;
+    if (document.activeElement !== $('#bt-to')) $('#bt-to').value = bt.to;
+    const today = new Date().toISOString().slice(0, 10), min = new Date(); min.setFullYear(min.getFullYear() - 5);
+    ['#bt-from', '#bt-to'].forEach(s => { $(s).max = today; $(s).min = min.toISOString().slice(0, 10); });
     // 처음 그릴 때는 종목 변수가 아직 없을 수 있음
     let mt = null; try { mt = modalTicker; } catch (e) { mt = null; }
     const rule = sltpOf(mt, stratSel);
@@ -517,7 +547,18 @@
     searchRefresh();
     if (!$('#chart-modal').hidden) { renderWatch(); if (modalTicker) showModalTicker(modalTicker); }
   }
-  $$('.bt-pick .chip[data-years]').forEach(b => b.addEventListener('click', () => { bt.years = +b.dataset.years; btChanged(); }));
+  $$('.bt-pick .chip[data-years]').forEach(b => b.addEventListener('click', () => {
+    bt.years = +b.dataset.years;
+    // '직접'을 처음 누르면 2년 전부터 오늘까지로 시작
+    if (!bt.years && !bt.from) { const f = new Date(); f.setFullYear(f.getFullYear() - 2); bt.from = f.toISOString().slice(0, 10); }
+    btChanged();
+  }));
+  // 직접 정한 기간 (주가는 최근 5년치까지만 있음). 시작이 끝보다 늦으면 서로 바꿈
+  ['from', 'to'].forEach(k => $('#bt-' + k).addEventListener('change', e => {
+    bt[k] = isDay(e.target.value) ? e.target.value : '';
+    if (bt.from && bt.to && bt.from > bt.to) [bt.from, bt.to] = [bt.to, bt.from];
+    btChanged();
+  }));
   ['sl', 'tp'].forEach(k => $('#bt-' + k).addEventListener('change', e => {
     const v = parseFloat(e.target.value);
     const rule = sltpOf(modalTicker, stratSel);
@@ -549,7 +590,7 @@
         if (st) rows.push({ sl, tp, st, sim });
       }
     } catch (e) { box.innerHTML = `<p class="neg small">계산 오류: ${esc(e.message || e)}</p>`; return; }
-    if (!rows.length) { box.innerHTML = `<p class="muted small">${esc(t)}: 최근 ${bt.years}년 동안 이 신호의 거래가 없습니다.</p>`; return; }
+    if (!rows.length) { box.innerHTML = `<p class="muted small">${esc(t)}: ${esc(btName())} 동안 이 신호의 거래가 없습니다.</p>`; return; }
     // 손절·익절이 한 번도 안 걸려 결과가 똑같은 조합은 하나만 (더 단순한 설정, 즉 '안 씀'에 가까운 쪽을 남김)
     const sig = x => [x.st.n, x.st.total.toFixed(6), x.st.mdd.toFixed(6)].join('|'), seen = new Set();
     const uniq = rows.filter(x => { const k = sig(x); if (seen.has(k)) return false; seen.add(k); return true; });
@@ -569,11 +610,14 @@
     const recent = bt.years > 1;
     const rTxt = x => { const q = statsOf(x.sim, 1); return q ? `${pr(q.total)} <span class="muted small">${q.n}번</span>` : '<span class="muted small">거래 없음</span>'; };
     const base1 = recent && base ? statsOf(base.sim, 1) : null;
-    box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · 최근 ${bt.years}년</b> <span class="muted small">손절 ${SL_GRID.length} × 익절 ${TP_GRID.length} = ${SL_GRID.length * TP_GRID.length}가지 조합 계산</span><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>
-      <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th>최대 낙폭</th>${recent ? '<th title="같은 조합으로 최근 1년만 따로 계산">최근 1년</th>' : ''}<th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
-        <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${pr(x.st.mdd)}</td>${recent ? `<td>${rTxt(x)}</td>` : ''}
+    // 1,000만원을 넣고 매번 전부 다시 넣었다면 (수수료 포함) 기간 끝에 얼마가 되는지
+    const won = v => `${Math.round(1000 * (1 + v)).toLocaleString('ko-KR')}만원`;
+    const mTxt = v => `<span class="money"><b>${won(v)}</b> <span class="chg ${v >= 0 ? 'up' : 'down'} small">${v >= 0 ? '+' : ''}${Math.round(1000 * v).toLocaleString('ko-KR')}만</span></span>`;
+    box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · ${esc(btName())}</b> <span class="muted small">손절 ${SL_GRID.length} × 익절 ${TP_GRID.length} = ${SL_GRID.length * TP_GRID.length}가지 조합 계산</span><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>
+      <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="처음에 1,000만원을 넣고 살 때마다 전부 넣었다면 (수수료 포함)">1,000만원이면</th><th>최대 낙폭</th>${recent ? '<th title="같은 조합으로 최근 1년만 따로 계산">최근 1년</th>' : ''}<th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
+        <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${mTxt(x.st.total)}</td><td>${pr(x.st.mdd)}</td>${recent ? `<td>${rTxt(x)}</td>` : ''}
         <td class="muted small">${tag}</td><td><button type="button" class="ghost mini" data-bt-apply="${x.sl || ''},${x.tp || ''}">적용</button></td></tr>`).join('')}</tbody></table></div>
-      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)}. 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''}${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
+      <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)} (1,000만원 → ${won(base ? base.st.hold : rows[0].st.hold)}). '1,000만원이면'은 처음에 1,000만원을 넣고 살 때마다 가진 돈을 전부 넣었다고 본 금액입니다 (수수료 포함, 세금 제외). 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''}${ok.length ? '' : ' 거래가 3번 미만이라 참고만 하세요.'}</p>`;
   }
   $('#bt-find').addEventListener('click', findSlTp);
   // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
@@ -636,7 +680,7 @@
     if (!ea || !ea.near || !['buy', 'hold'].includes(st.cls)) return '';
     return `<p class="earn-warn small">⚠ ${esc(ea.text)}: 실적 발표 전후로는 주가가 크게 튀어 신호가 잘 안 맞습니다. ${st.cls === 'buy' ? '발표 뒤에 들어가는 것도 방법입니다.' : '발표 전에 정리할지 생각해 보세요.'}</p>`;
   }
-  const btFromTxt = d => d.time[btStart(d)];
+  const btFromTxt = d => btSpanTxt(d);
   const btRuleTxt = ss => { const r = sltpOf(modalTicker, stratSel); return r.sl || r.tp ? ` · ${[r.sl ? `손절 -${r.sl}%` : '', r.tp ? `익절 +${r.tp}%` : ''].filter(Boolean).join(' · ')}${ss && ss.stops ? ` (${ss.stops}번 발동)` : ''}` : ''; };
   // 차트 아래 "신호 자세히": 고른 신호, 모든 전략 승률 비교, 켜 둔 지표 상태, 최근 신호
   function renderSigInfo(r) {
@@ -653,8 +697,8 @@
           const days = L - latest.i;
           lastTxt = `마지막 신호: <b>${latest.kind === 'buy' ? '매수' : '청산'}</b> · ${d.time[latest.i]}${days ? ` (${days}거래일 전)` : ''} · ${fmtP(d.close[latest.i])}` + (days ? ` → 지금 ${fmtP(last)} ${fmtR(last / d.close[latest.i] - 1)}` : '');
         }
-        const stats = ss ? `${ss.from} 이후 이 조건대로 사고팔았다면: 거래 ${ss.n}번 · 이긴 거래 ${ss.wins}번 (<b>${Math.round(ss.rate * 100)}%</b>) · 거래당 평균 ${fmtR(ss.avg)} · 누적 ${fmtR(ss.total)} · 최대 낙폭 ${fmtR(ss.mdd)}` +
-          ` · 같은 기간 그냥 들고 있었다면 ${fmtR(ss.hold)} <span class="muted">(다음 날 시가 체결, 수수료 ${(sim.fee * 100).toFixed(2)}%${btRuleTxt(ss)})</span>` : `<span class="muted">${esc(btFromTxt(d))} 이후 끝난 거래가 없습니다.</span>`;
+        const stats = ss ? `${esc(btDuring(d))} 이 조건대로 사고팔았다면: 거래 ${ss.n}번 · 이긴 거래 ${ss.wins}번 (<b>${Math.round(ss.rate * 100)}%</b>) · 거래당 평균 ${fmtR(ss.avg)} · 누적 ${fmtR(ss.total)} · 최대 낙폭 ${fmtR(ss.mdd)}` +
+          ` · 같은 기간 그냥 들고 있었다면 ${fmtR(ss.hold)} <span class="muted">(다음 날 시가 체결, 수수료 ${(sim.fee * 100).toFixed(2)}%${btRuleTxt(ss)})</span>` : `<span class="muted">${esc(btDuring(d))} 끝난 거래가 없습니다.</span>`;
         html = `<div class="strat-row" style="--c:${s.color}">
           <div class="strat-head"><i></i><b>${esc(s.name)}</b><span class="sig-badge ${st.cls}">${st.text}</span></div>
           <p class="strat-desc muted small">${esc(s.desc || '')}</p>
@@ -669,8 +713,8 @@
         (sim.error ? '<td colspan="6" class="muted">계산 오류</td>' :
           `<td>${ss ? ss.n : 0}</td><td>${ss ? `<b>${Math.round(ss.rate * 100)}%</b>` : '-'}</td><td>${ss ? fmtR(ss.avg) : '-'}</td><td>${ss ? fmtR(ss.total) : '-'}</td><td>${ss ? fmtR(ss.mdd) : '-'}</td><td><span class="sig-tag ${st.cls}">${st.short || '-'}</span></td>`) + '</tr>';
     }).join('');
-    const s0 = btStart(d);
-    html += `<h4 class="cmp-title">전략별 지난 성적 <span class="muted small">${esc(modalTicker || '')} · ${d.time[s0]} 이후 · 그냥 들고 있었다면 ${fmtR(d.close[L] / d.open[s0] - 1)}${btRuleTxt()}</span></h4>
+    const [s0, e0] = btRange(d);
+    html += `<h4 class="cmp-title">전략별 지난 성적 <span class="muted small">${esc(modalTicker || '')} · ${esc(btSpanTxt(d))} · 그냥 들고 있었다면 ${fmtR(d.close[e0] / d.open[s0] - 1)}${btRuleTxt()}</span></h4>
       <div class="table-scroll"><table class="grid cmp"><thead><tr><th>신호</th><th>거래</th><th>승률</th><th>거래당 평균</th><th>누적</th><th>최대 낙폭</th><th>오늘</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     $('#sig-strats').innerHTML = html;
 
