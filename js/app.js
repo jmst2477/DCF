@@ -476,6 +476,8 @@
   const lsGet = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? def : v; } catch (e) { return def; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 저장 불가 */ } };
   let stratSel = lsGet('dcf-strategy-id', null);
+  // 기본 신호: 사용자가 직접 고른 신호. ★ 종목을 열어 잠깐 바뀐 신호(stratSel)와 달리, ★ 없는 종목의 목록 신호·카톡 알림은 늘 이 신호를 씀
+  let baseSel = stratSel;
   let indOff = lsGet('dcf-indicators-off', []);
   // 종목별로 손절·익절을 적용할 때 쓴 신호 (그 종목을 열면 이 신호로 먼저 보여 줌)
   const TSTRAT_KEY = 'dcf-ticker-strat';
@@ -497,11 +499,12 @@
   })();
   // 종목을 빼면 그 종목의 손절·익절과 적용 신호 기록도 지움
   function forgetTicker(t) { delete sltp[t]; delete tstrat[t]; lsSet(SLTP_KEY, sltp); lsSet(TSTRAT_KEY, tstrat); }
-  // 종목을 열 때: 저장된 신호가 있고 지금 고른 신호와 다르면 그 신호로 바꿈. 바뀌었으면 true
+  // 종목을 열 때: ★ 신호가 있으면 그 신호로, 없으면 기본 신호로 바꿈 (기본 신호 저장값은 건드리지 않음). 바뀌었으면 true
   function useTickerStrat(t) {
-    const sid = t && tstrat[t];
+    let sid = t && tstrat[t];
+    if (!sid || !STRATS.some(x => x.id === sid)) sid = baseSel;
     if (!sid || sid === stratSel || !STRATS.some(x => x.id === sid)) return false;
-    stratSel = sid; lsSet('dcf-strategy-id', stratSel); renderPickers();
+    stratSel = sid; renderPickers();
     return true;
   }
   const activeStrats = () => {
@@ -711,7 +714,7 @@
     }
     if (b) {
       if (b.dataset.sid === stratSel) return;
-      stratSel = b.dataset.sid;
+      stratSel = baseSel = b.dataset.sid;
       lsSet('dcf-strategy-id', stratSel);
       searchRefresh(); // 열려 있으면 새 신호로 다시 계산
     } else if (ib) {
@@ -1523,7 +1526,7 @@
   function wlStratFor(t) {
     const cur = activeStrats()[0];
     if (wlMode !== 'ticker') return cur;
-    return STRATS.find(x => x.id === tstrat[t]) || cur;
+    return STRATS.find(x => x.id === tstrat[t]) || STRATS.find(x => x.id === baseSel) || cur;
   }
   function renderWlMode() {
     $$('#wl-mode [data-wl-mode]').forEach(b => b.classList.toggle('on', b.dataset.wlMode === wlMode));
@@ -1560,7 +1563,9 @@
     items.forEach(t => getSig(t).then(r => {
       const el = list.querySelector(`.wl-val[data-v="${CSS.escape(t)}"]`);
       if (!el) return;
-      const s0 = wlStratFor(t), sim0 = s0 && simOf(r, s0), st = sigState(r.d, sim0);
+      const s0 = wlStratFor(t), sim0 = s0 && simOf(r, s0);
+      // 종목별 적용 신호 보기에서 ★(손절·익절 적용) 없는 종목은 매수·청산 표시를 안 함 (손절·익절을 찾은 뒤에 매매)
+      const st = wlMode === 'ticker' && !STRATS.some(x => x.id === tstrat[t]) ? { short: '', cls: 'none' } : sigState(r.d, sim0);
       const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
       const ea = earnOf(r.d);
       el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}${ea && ea.near ? ` <span class="sig-pill earn" title="${esc(ea.text)}">실적 ${ea.dday ? 'D-' + ea.dday : '오늘'}</span>` : ''}`;
@@ -2052,7 +2057,7 @@
     customs.push(draft);
     lsSet(CUSTOM_KEY, customs);
     mountCustoms();
-    if (draft.kind === 'strategy') { stratSel = draft.id; lsSet('dcf-strategy-id', stratSel); } else { indOff = indOff.filter(x => x !== draft.id); lsSet('dcf-indicators-off', indOff); }
+    if (draft.kind === 'strategy') { stratSel = baseSel = draft.id; lsSet('dcf-strategy-id', stratSel); } else { indOff = indOff.filter(x => x !== draft.id); lsSet('dcf-indicators-off', indOff); }
     draft = null;
     $('#add-code').value = '';
     $('#add-name').value = '';
