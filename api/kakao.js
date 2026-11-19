@@ -96,7 +96,7 @@ async function accessToken() {
   await redis("SET", K.tok, JSON.stringify(t));
   return t;
 }
-async function sendMemo(text, link) {
+export async function sendMemo(text, link) {
   const t = await accessToken();
   const tpl = { object_type: "text", text: text.slice(0, 200), link: { web_url: link || t.origin, mobile_web_url: link || t.origin }, button_title: "사이트 열기" };
   const r = await fetch("https://kapi.kakao.com/v2/api/talk/memo/default/send", {

@@ -87,6 +87,8 @@ button.ghost { background: var(--accent-weak); color: var(--accent-dark); }
 button.ghost:hover { background: color-mix(in srgb, var(--accent-weak) 80%, var(--accent) 20%); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.mini { padding: 4px 10px; font-size: 12px; border-radius: 8px; }
+a.btn-link { display: inline-block; padding: 4px 10px; font-size: 12px; border-radius: 8px; background: var(--accent-weak); color: var(--accent-dark); font-weight: 600; text-decoration: none; }
+a.btn-link:hover { background: color-mix(in srgb, var(--accent-weak) 80%, var(--accent) 20%); }
 .top-actions, .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 0; }
 
 /* 입력 */

@@ -1,8 +1,26 @@
 {
   "functions": {
-    "api/kakao.js": { "includeFiles": "js/**", "maxDuration": 60 }
+    "api/kakao.js": {
+      "includeFiles": "js/**",
+      "maxDuration": 60
+    },
+    "api/agent.js": {
+      "includeFiles": "js/**",
+      "maxDuration": 60
+    }
   },
   "crons": [
-    { "path": "/api/kakao?action=cron", "schedule": "0 22 * * 2-6" }
+    {
+      "path": "/api/kakao?action=cron",
+      "schedule": "0 22 * * 1-5"
+    },
+    {
+      "path": "/api/agent?action=cron&step=close",
+      "schedule": "30 22 * * 1-5"
+    },
+    {
+      "path": "/api/agent?action=cron&step=open",
+      "schedule": "0 2 * * 1-5"
+    }
   ]
 }
