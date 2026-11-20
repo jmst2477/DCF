@@ -7,10 +7,13 @@
 // 매일 아침 Vercel Cron(vercel.json)이 GET /api/kakao?action=cron 을 부르면 동기화된 관심 종목을 확인해 새 신호가 있을 때만 보낸다.
 // 사이트에서 부르는 것은 모두 동기화 비밀번호가 맞아야 한다 (api/sync.js 와 같은 비밀번호·잠금).
 //   GET                         → { configured, connected, redirect, last }
-//   POST { action, password }  action = start(로그인 주소) | test(시험 보내기) | check(지금 확인해서 보내기) | off(연결 끊기)
+//   POST { action, password }  action = start(로그인 주소) | test(시험 보내기) | check(지금 확인해서 보내기) | report(리서치 보고서 보내기) | off(연결 끊기)
+// 매일 아침 8시대 GET /api/kakao?action=report 로 리서치 보고서(api/_report.js)도 보낸다.
 
 import crypto from "node:crypto";
-import { checkAll, messages } from "./_signals.js";
+import { checkAll, messages, strategies, plan, libs } from "./_signals.js";
+import { makeReport, reportMessages } from "./_report.js";
+import { dailyBars, summary } from "./prices.js";
 
 function env(suffixes) {
   for (const s of suffixes) if (process.env[s]) return process.env[s];
@@ -23,7 +26,7 @@ const KEY = process.env.KAKAO_REST_API_KEY || "";
 const SECRET = process.env.KAKAO_CLIENT_SECRET || "";
 const K = {
   pw: "dcf:sync2:pw", data: "dcf:sync2:data", fails: "dcf:sync2:fails",
-  tok: "dcf:kakao:tok", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
+  tok: "dcf:kakao:tok", report: "dcf:kakao:report", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
 };
 const MAX_FAILS = 20;
 
@@ -124,6 +127,24 @@ async function runCheck(force) {
   return { ...last, list: events, messages: msgs };
 }
 
+// FRED 공개 CSV (키 필요 없음). 최근 1년치
+async function fred(id) {
+  const from = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
+  const r = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${from}`, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!r.ok) throw new Error("FRED " + r.status);
+  return (await r.text()).trim().split("\n").slice(1).map(l => l.split(",")).map(([date, v]) => ({ date, v: Number(v) })).filter(x => /^\d{4}-\d\d-\d\d$/.test(x.date) && isFinite(x.v));
+}
+// 에이전트 리서치 보고서를 만들어 카톡으로 보냄 (매일 아침 Cron, 사이트의 "리서치 미리 보내기")
+async function runReport() {
+  const s = await jget(K.data);
+  const data = (s && s.data) || {};
+  const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA }, { data, pos: (await jget("agent:pos")) || {} });
+  const msgs = reportMessages(r);
+  for (const m of msgs) await sendMemo(m);
+  await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10) }));
+  return { date: r.date, messages: msgs, sent: msgs.length, errors: r.errors };
+}
+
 const page = (res, ok, text) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   return res.status(ok ? 200 : 400).send(
@@ -150,6 +171,13 @@ export default async function handler(req, res) {
         await redis("SET", K.last, JSON.stringify({ at: new Date().toISOString(), error: String((e && e.message) || e) }));
         throw e;
       }
+    }
+    // 매일 아침 리서치 보고서 (Vercel Cron)
+    if (req.method === "GET" && q.action === "report") {
+      if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "unauthorized" });
+      if (!ready || !(await redis("GET", K.tok))) return res.status(200).json({ skipped: "not connected" });
+      const r = await runReport();
+      return res.status(200).json({ date: r.date, sent: r.sent, errors: r.errors.length });
     }
     // 카카오 로그인 후 돌아오는 곳
     if (req.method === "GET" && (q.code || q.error)) {
@@ -207,6 +235,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
     if (body.action === "check") return res.status(200).json(await runCheck(true));
+    if (body.action === "report") return res.status(200).json(await runReport());
     if (body.action === "off") {
       await redis("DEL", K.tok);
       return res.status(200).json({ ok: true });

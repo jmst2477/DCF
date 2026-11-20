@@ -92,7 +92,7 @@ export function profileOf(qs) {
   const a = q.assetProfile || {};
   return a.sector || a.industry ? { sector: a.sector || null, industry: a.industry || null } : null;
 }
-async function summary(ticker) {
+export async function summary(ticker) {
   const { H, crumb } = await yahooSession();
   const r = await fetch(
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=calendarEvents,assetProfile&crumb=${encodeURIComponent(crumb)}`,

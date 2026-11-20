@@ -1858,7 +1858,7 @@
   async function kakaoBox(note) {
     const box = $(KK.box), msg = $(KK.msg);
     box.hidden = false;
-    ['#kakao-connect', '#kakao-check', '#kakao-off'].forEach(s => { $(s).hidden = true; });
+    ['#kakao-connect', '#kakao-check', '#kakao-report', '#kakao-off'].forEach(s => { $(s).hidden = true; });
     if (note === undefined) $(KK.list).textContent = '';
     const tail = note ? `<br>${note}` : '';
     if (!syncOn()) { msg.innerHTML = '먼저 <b>☁ 자동 동기화</b>를 켜 주세요. 서버가 동기화된 종목과 종목별 적용 신호로 매일 확인합니다.' + tail; return; }
@@ -1881,15 +1881,18 @@
     if (L && L.error) lastTxt = `<br><span class="neg">마지막 확인 오류 (${esc(fmtAt(L.at))}): ${esc(L.error)}</span>`;
     else if (L) lastTxt = `<br><span class="muted">마지막 확인: ${esc(fmtAt(L.at))} · ${esc(L.date || '')} 종가 · ${L.checked}종목 · 새 신호 ${L.events}개${L.sent ? ' · 카톡 보냄' : ''}</span>` +
       (L.errors && L.errors.length ? `<br><span class="neg">주가를 못 받은 종목: ${esc(L.errors.join(', '))}</span>` : '');
-    msg.innerHTML = '<b>카카오톡 알림 켜짐.</b> 매일 아침 7시쯤(미국 장 마감 뒤) 종목별 적용 신호에 새 매수·청산·손절·익절이 있으면 카톡으로 보냅니다. 신호가 없는 날은 보내지 않습니다.' + lastTxt + tail;
-    $('#kakao-check').hidden = false; $('#kakao-off').hidden = false;
+    msg.innerHTML = '<b>카카오톡 알림 켜짐.</b> 매일 아침 7시쯤(미국 장 마감 뒤) 종목별 적용 신호에 새 매수·청산·손절·익절이 있으면 카톡으로 보냅니다. 신호가 없는 날은 보내지 않습니다. 8시쯤엔 시장 국면·섹터·금리·유동성 리서치 보고서도 보냅니다.' + lastTxt + tail;
+    $('#kakao-check').hidden = false; $('#kakao-report').hidden = false; $('#kakao-off').hidden = false;
   }
   async function kakaoDo(action, btn) {
     btn.disabled = true;
     try {
       const j = await kakaoCall(action);
       if (action === 'start') { location.href = j.url; return; }
-      if (action === 'check') {
+      if (action === 'report') {
+        $(KK.list).textContent = (j.messages || []).join('\n\n');
+        await kakaoBox(`<span class="pos">리서치 보고서를 카톡으로 보냈습니다 (${j.sent}통).</span>` + (j.errors && j.errors.length ? `<br><span class="muted">못 받은 자료: ${esc(j.errors.slice(0, 5).join(', '))}</span>` : ''));
+      } else if (action === 'check') {
         $(KK.list).textContent = (j.messages || []).join('\n\n');
         await kakaoBox(`<span class="pos">${j.sent ? '카톡으로 보냈습니다.' : '보낼 내용이 없습니다.'}</span>`);
       } else await kakaoBox(action === 'off' ? '연결을 끊었습니다.' : undefined);
@@ -1898,6 +1901,7 @@
   }
   $('#kakao-btn').addEventListener('click', () => { const b = $(KK.box); if (!b.hidden) { b.hidden = true; return; } kakaoBox(); });
   $('#kakao-close').addEventListener('click', () => { $(KK.box).hidden = true; });
+  $('#kakao-report').addEventListener('click', e => kakaoDo('report', e.currentTarget));
   $('#kakao-connect').addEventListener('click', e => kakaoDo('start', e.currentTarget));
   $('#kakao-check').addEventListener('click', e => kakaoDo('check', e.currentTarget));
   $('#kakao-off').addEventListener('click', e => { if (confirm('카카오톡 알림 연결을 끊을까요?')) kakaoDo('off', e.currentTarget); });
