@@ -122,10 +122,11 @@ export function makeAgent(deps) {
   async function monthCheck(bal, pos) {
     const m = etDate(now()).slice(0, 7);
     let month = await get(K.month, null);
-    if (!month || month.m !== m) {
-      let cash = 0;
-      try { cash = (await kis.buyingPower("NASD", "AAPL", 1)).usd; } catch { /* 모르면 보유 평가액만 */ }
-      month = { m, base: cash + bal.reduce((s, x) => s + x.value, 0), realized: 0 };
+    // 기준 금액이 0 이면(아직 달러가 없거나 조회 실패) 다음 확인 때 다시 잰다. 0 으로 굳으면 손실 한도가 안 걸린다
+    if (!month || month.m !== m || !(month.base > 0)) {
+      let cash = 0, cashErr = null;
+      try { cash = Number((await kis.buyingPower("NASD", "AAPL", 1)).usd) || 0; } catch (e) { cashErr = String((e && e.message) || e); }
+      month = { m, base: cash + bal.reduce((s, x) => s + x.value, 0), realized: (month && month.m === m && month.realized) || 0, cashErr };
       await store.set(K.month, month);
     }
     const unreal = Object.entries(pos).reduce((s, [t, p]) => {

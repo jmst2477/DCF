@@ -152,7 +152,7 @@ function render(s){
   const pl=s.plan&&s.plan.exits||[];
   $('#plan').innerHTML=pl.length?pl.map(x=>'<div class="log">'+(x.price?'익절 대기 지정가 $'+x.price:'장 시작 시장가 매도')+' · '+esc(x.t)+' '+x.qty+'주 · '+esc(x.why)+(s.plan.sent?' (보냄)':'')+'</div>').join(''):'<p class="mu">청산할 것이 없습니다.</p>';
   const m=s.month,L=s.limits;
-  $('#month').innerHTML=m?'<div>실현 손익 <b class="'+(m.realized<0?'neg':'pos')+'">$'+(m.realized||0).toFixed(2)+'</b></div><div class="mu">월초 계좌 $'+Math.round(m.base).toLocaleString()+' · 손실이 '+L.monthLoss+'% 넘으면 새 매수 멈춤</div>':'<p class="mu">첫 종가 확인 뒤에 보입니다.</p>';
+  $('#month').innerHTML=m?'<div>실현 손익 <b class="'+(m.realized<0?'neg':'pos')+'">$'+(m.realized||0).toFixed(2)+'</b></div><div class="mu">월초 계좌 $'+Math.round(m.base).toLocaleString()+' · 손실이 '+L.monthLoss+'% 넘으면 새 매수 멈춤</div>'+(m.cashErr?'<div class="mu neg">달러 잔고 조회 실패: '+esc(m.cashErr)+'</div>':(m.base>0?'':'<div class="mu neg">계좌에 달러가 없어요. 매수하려면 달러로 환전해 두세요.</div>')):'<p class="mu">첫 종가 확인 뒤에 보입니다.</p>';
   $('#month').innerHTML+='<div class="mu">매수 1건 '+(L.buyKrw/1e4).toLocaleString()+'만원 · 하루 '+L.maxBuys+'건까지 · 지정가 = 종가 +'+L.slip+'%</div>';
   $('#pause').textContent=s.paused?'▶ 다시 켜기':'⏸ 멈추기';$('#pause').className=s.paused?'':'ghost';
   $('#log').innerHTML=(s.log||[]).map(l=>'<div class="log">'+t2(l.at)+' · '+esc(l.text)+'</div>').join('')||'<p class="mu">아직 없습니다.</p>';
