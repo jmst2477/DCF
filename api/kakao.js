@@ -13,6 +13,7 @@
 import crypto from "node:crypto";
 import { checkAll, messages, strategies, plan, libs } from "./_signals.js";
 import { makeReport, reportMessages } from "./_report.js";
+import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
 import { dailyBars, summary } from "./prices.js";
 
 function env(suffixes) {
@@ -26,7 +27,7 @@ const KEY = process.env.KAKAO_REST_API_KEY || "";
 const SECRET = process.env.KAKAO_CLIENT_SECRET || "";
 const K = {
   pw: "dcf:sync2:pw", data: "dcf:sync2:data", fails: "dcf:sync2:fails",
-  tok: "dcf:kakao:tok", report: "dcf:kakao:report", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
+  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
 };
 const MAX_FAILS = 20;
 
@@ -139,10 +140,40 @@ async function runReport() {
   const s = await jget(K.data);
   const data = (s && s.data) || {};
   const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA }, { data, pos: (await jget("agent:pos")) || {} });
-  const msgs = reportMessages(r);
+  const news = await jget(K.news);
+  const fresh = news && Date.now() - Date.parse(news.at) < 30 * 3600e3;
+  const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : []);
   for (const m of msgs) await sendMemo(m);
-  await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10) }));
+  await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10),
+    regime: r.spy ? r.spy.kind : null, strong: r.strong.map(s => s.ko).join(", ") }));
   return { date: r.date, messages: msgs, sent: msgs.length, errors: r.errors };
+}
+
+// 관심 종목 뉴스 제목을 모아 Claude 로 분석해 저장 (매일 미국 장 마감 무렵 Cron, 리서치 미리 보내기 전에도)
+async function runNews() {
+  const s = await jget(K.data);
+  const data = (s && s.data) || {};
+  const star = Object.fromEntries(plan(data).map(x => [x.t, x.strat.name]));
+  const pos = (await jget("agent:pos")) || {};
+  const wl = (Array.isArray(data["dcf-watchlist"]) ? data["dcf-watchlist"] : []).filter(t => typeof t === "string" && t).slice(0, 25);
+  Object.keys(pos).forEach(t => { if (!wl.includes(t)) wl.push(t); });
+  const items = [], errors = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(5, wl.length) }, async () => {
+    while (next < wl.length) {
+      const t = wl[next++];
+      try { const news = await tickerNews(t); if (news.length) items.push({ t, news, star: star[t], held: !!pos[t] }); } catch (e) { errors.push(`${t}: ${e.message || e}`); }
+    }
+  }));
+  const count = items.reduce((n, x) => n + x.news.length, 0);
+  let out;
+  try {
+    const last = await jget(K.report);
+    out = items.length ? await analyzeNews(items, { regime: last && last.regime, strong: last && last.strong }) : { market: "", strategy: "", tickers: [] };
+  } catch (e) { out = { error: String((e && e.message) || e), tickers: [] }; }
+  const saved = { at: new Date().toISOString(), count, ...out, errors: errors.slice(0, 10) };
+  await redis("SET", K.news, JSON.stringify(saved));
+  return saved;
 }
 
 const page = (res, ok, text) => {
@@ -178,6 +209,13 @@ export default async function handler(req, res) {
       if (!ready || !(await redis("GET", K.tok))) return res.status(200).json({ skipped: "not connected" });
       const r = await runReport();
       return res.status(200).json({ date: r.date, sent: r.sent, errors: r.errors.length });
+    }
+    // 뉴스 수집·분석 (Vercel Cron). 카톡은 리서치 보고서 때 같이 보냄
+    if (req.method === "GET" && q.action === "news") {
+      if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "unauthorized" });
+      if (!(URL_ && TOKEN)) return res.status(200).json({ skipped: "no store" });
+      const r = await runNews();
+      return res.status(200).json({ count: r.count, tickers: (r.tickers || []).length, error: r.error || null });
     }
     // 카카오 로그인 후 돌아오는 곳
     if (req.method === "GET" && (q.code || q.error)) {
@@ -236,6 +274,13 @@ export default async function handler(req, res) {
     }
     if (body.action === "check") return res.status(200).json(await runCheck(true));
     if (body.action === "report") return res.status(200).json(await runReport());
+    if (body.action === "news") {
+      // 오늘(30시간 안) 이미 분석했으면 다시 안 함 (Claude 비용)
+      const n = await jget(K.news);
+      if (n && !n.error && Date.now() - Date.parse(n.at) < 30 * 3600e3 && !body.force) return res.status(200).json({ cached: true, count: n.count });
+      const r = await runNews();
+      return res.status(200).json({ count: r.count, error: r.error || null });
+    }
     if (body.action === "off") {
       await redis("DEL", K.tok);
       return res.status(200).json({ ok: true });
