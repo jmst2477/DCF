@@ -185,3 +185,36 @@ export function reportMessages(r) {
   if (o) out.push(`🧭 종합평가: ${o.level} (점수 ${o.score > 0 ? "+" : ""}${o.score})\n${o.action}\n근거: ${o.why.join(" · ") || "-"}\n※ 규칙으로 계산한 참고값이며 투자 판단은 본인 몫입니다.`);
   return out.map(m => (m.length > 200 ? m.slice(0, 197) + "…" : m));
 }
+
+// 새 후보 종목 찾기 (주 1회): 한투 조건검색(시가총액 100억 달러 이상·주가 10달러 이상) → 관심 목록 밖 큰 종목 중
+// 200일선·50일선 위, 3개월 상대강도 플러스, 1년 고점 10% 안쪽인 종목을 점수순 5개. 매수는 하지 않고 보고서에만 올린다.
+// deps: { screen() → [{t, excd, name, capK}], bars(t, range), strategies list, TA }
+export async function discoverCandidates(deps, { exclude = [], strats = [], TA, max = 60 } = {}) {
+  const { screen, bars } = deps;
+  const skip = new Set(exclude.map(t => String(t).toUpperCase()));
+  const seen = new Set();
+  const list = (await screen()).filter(x => x && x.t && /^[A-Z]{1,5}$/.test(x.t) && !skip.has(x.t) && x.tradable !== false && !seen.has(x.t) && seen.add(x.t))
+    .sort((a, b) => (b.capK || 0) - (a.capK || 0)).slice(0, max);
+  const spy = await bars("SPY", "2y");
+  const spy3 = ret(spy.close, 63), spy1 = ret(spy.close, 21);
+  const rows = (await pool(list, 8, async x => {
+    const d = await bars(x.t, "2y");
+    if (!d || !d.close || d.close.length < 260) return null;
+    const c = d.close, p = last(c), s200 = sma(c, 200), s50 = sma(c, 50);
+    const hi = Math.max(...c.slice(-252)), dist = p / hi - 1;
+    const rs3 = ret(c, 63) - spy3, rs1 = ret(c, 21) - spy1;
+    if (!(p > s200 && p > s50 && rs3 > 0 && dist >= -0.1)) return null;
+    const fits = strats.map(s => { try { const q = quickStats(d, s, TA); return q && q.n >= 3 ? { id: s.id, name: s.short || s.name, ...q } : null; } catch { return null; } })
+      .filter(Boolean).sort((a, b) => b.ret - a.ret);
+    const best = fits[0] || null;
+    const score = rs3 * 100 + rs1 * 50 + (dist > -0.03 ? 5 : 0) + (best && best.win >= 0.6 ? 5 : 0);
+    return { t: x.t, name: x.name, capB: x.capK ? Math.round(x.capK / 1e6) : null, rs3, rs1, dist, best, score };
+  })).filter(r => r && !r.error);
+  return { at: new Date().toISOString(), scanned: list.length, picks: rows.sort((a, b) => b.score - a.score).slice(0, 5) };
+}
+export function discoverMessage(dsc) {
+  if (!dsc || !dsc.picks) return null;
+  if (!dsc.picks.length) return `🔎 이번 주 새 후보: ${dsc.scanned}종목을 봤지만 조건(추세·상대강도·고점 근처)을 다 넘는 종목이 없습니다.`;
+  const m = `🔎 이번 주 새로 볼 종목 (관심 목록 밖, 시총 100억$↑)\n` + dsc.picks.map(x => `${x.t} 3개월 S&P대비 ${pct(x.rs3, 0)} · 고점 ${pct(x.dist, 0)}${x.best ? ` · ${x.best.name} ${pct(x.best.ret, 0)}` : ""}`).join("\n");
+  return m.length > 200 ? m.slice(0, 197) + "…" : m;
+}

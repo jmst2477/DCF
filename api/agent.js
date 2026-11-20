@@ -44,10 +44,11 @@ const store = {
 
 function agent(req) {
   const W = libs();
+  const kis = makeKis({ store });
   return makeAgent({
-    store, env: process.env, TA: W.TA, plan, simulate,
-    kis: makeKis({ store }),
-    bars: t => dailyBars(t, "2y"),
+    store, env: process.env, TA: W.TA, plan, simulate, kis,
+    // 야후가 안 되면 한투 일봉(최근 300개)으로
+    bars: async t => { try { return await dailyBars(t, "2y"); } catch (e) { try { return await kis.daily(t, null, 3); } catch { throw e; } } },
     send: async (text, link) => { try { await sendMemo(text, link); } catch { /* 카톡이 끊겨 있어도 주문 흐름은 계속 */ } },
   });
 }
@@ -102,7 +103,9 @@ export default async function handler(req, res) {
     if (body.action === "pause" || body.action === "resume") { await A.setPaused(body.action === "pause"); return res.status(200).json(await A.status()); }
     if (body.action === "close") return res.status(200).json(await A.closeStep({ data: await syncData(), origin: originOf(req), force: true }));
     if (body.action === "status") return res.status(200).json(await A.status());
-    return res.status(400).json({ error: "action 은 status · approve · reject · pause · resume · close" });
+    if (body.action === "broker") return res.status(200).json(await A.broker());
+    if (body.action === "cancel") return res.status(200).json(await A.cancel(String(body.no || "")));
+    return res.status(400).json({ error: "action 은 status · approve · reject · pause · resume · close · broker · cancel" });
   } catch (e) {
     return res.status(500).json({ error: String((e && e.message) || e) });
   }
@@ -134,6 +137,7 @@ ${!ready ? `<div class="card"><h2>아직 준비 중</h2><p class="mu">Vercel 환
 <div class="card"><h2>매수 승인</h2><div id="appr"></div></div>
 <div class="card"><h2>에이전트가 가진 종목</h2><div id="pos"></div></div>
 <div class="card"><h2>오늘 밤 주문</h2><div id="plan"></div></div>
+<div class="card"><h2>한투에 걸린 주문</h2><div id="broker"><p class="mu">불러오는 중…</p></div></div>
 <div class="card"><h2>이번 달</h2><div id="month"></div><p></p><div class="btns"><button id="pause" class="ghost"></button><button id="close" class="ghost">지금 종가 확인</button></div><p id="amsg" class="mu"></p></div>
 <div class="card"><h2>기록</h2><div id="log"></div></div>
 </div>`}
@@ -142,30 +146,36 @@ ${!ready ? `<div class="card"><h2>아직 준비 중</h2><p class="mu">Vercel 환
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let PW='';
 async function call(action,extra){const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,password:PW,...extra})});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
-const ST={pending:'승인 대기',approved:'승인됨 · 10시 이후 주문',sent:'주문 보냄',rejected:'거절',expired:'시간 지남',failed:'주문 실패'};
+const ST={pending:'승인 대기',approved:'승인됨 · 10시 이후 주문',sent:'주문 보냄',rejected:'거절',expired:'시간 지남',failed:'주문 실패',canceled:'취소함'};
 const t2=s=>new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 function render(s){
   const ap=s.appr||[];
-  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> <span class="mu">'+esc(a.name)+'</span><div class="mu">'+esc(a.sig)+' 종가 $'+a.close.toFixed(2)+' → 지정가 $'+a.limit.toFixed(2)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'">승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
+  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> <span class="mu">'+esc(a.name)+'</span><div class="mu">'+esc(a.sig)+' 종가 $'+a.close.toFixed(2)+' → 지정가 $'+a.limit.toFixed(2)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'">승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
   const ps=Object.entries(s.pos||{});
   $('#pos').innerHTML=ps.length?ps.map(([t,p])=>'<div class="row"><div><b>'+esc(t)+'</b> '+p.qty+'주 · 평균 $'+p.avg.toFixed(2)+'<div class="mu">'+esc(p.since)+'부터'+(p.rule&&(p.rule.sl||p.rule.tp)?' · 손절 '+(p.rule.sl||'-')+'% 익절 '+(p.rule.tp||'-')+'%':'')+'</div></div></div>').join(''):'<p class="mu">없습니다. (직접 산 주식은 건드리지 않습니다)</p>';
   const pl=s.plan&&s.plan.exits||[];
   $('#plan').innerHTML=pl.length?pl.map(x=>'<div class="log">'+(x.price?'익절 대기 지정가 $'+x.price:'장 시작 시장가 매도')+' · '+esc(x.t)+' '+x.qty+'주 · '+esc(x.why)+(s.plan.sent?' (보냄)':'')+'</div>').join(''):'<p class="mu">청산할 것이 없습니다.</p>';
   const m=s.month,L=s.limits;
-  $('#month').innerHTML=m?'<div>실현 손익 <b class="'+(m.realized<0?'neg':'pos')+'">$'+(m.realized||0).toFixed(2)+'</b></div><div class="mu">월초 계좌 $'+Math.round(m.base).toLocaleString()+' · 손실이 '+L.monthLoss+'% 넘으면 새 매수 멈춤</div>'+(m.cashErr?'<div class="mu neg">달러 잔고 조회 실패: '+esc(m.cashErr)+'</div>':(m.base>0?'':'<div class="mu neg">계좌에 달러가 없어요. 매수하려면 달러로 환전해 두세요.</div>')):'<p class="mu">첫 종가 확인 뒤에 보입니다.</p>';
+  $('#month').innerHTML=m?'<div>실현 손익 <b class="'+(m.realized<0?'neg':'pos')+'">$'+(m.realized||0).toFixed(2)+'</b>'+(m.realizedSrc?' <span class="mu">(한투 기준)</span>':'')+'</div>'+(m.kisAll!=null?'<div class="mu">계좌 전체 이번 달 실현 손익(직접 매매 포함) $'+m.kisAll.toFixed(2)+'</div>':'')+'<div class="mu">월초 계좌 $'+Math.round(m.base).toLocaleString()+' · 손실이 '+L.monthLoss+'% 넘으면 새 매수 멈춤</div>'+(m.cashErr?'<div class="mu neg">달러 잔고 조회 실패: '+esc(m.cashErr)+'</div>':(m.base>0?'':'<div class="mu neg">계좌에 달러가 없어요. 매수하려면 달러로 환전해 두세요.</div>')):'<p class="mu">첫 종가 확인 뒤에 보입니다.</p>';
   $('#month').innerHTML+='<div class="mu">매수 1건 '+(L.buyKrw/1e4).toLocaleString()+'만원 · 하루 '+L.maxBuys+'건까지 · 지정가 = 종가 +'+L.slip+'%</div>';
   $('#pause').textContent=s.paused?'▶ 다시 켜기':'⏸ 멈추기';$('#pause').className=s.paused?'':'ghost';
   $('#log').innerHTML=(s.log||[]).map(l=>'<div class="log">'+t2(l.at)+' · '+esc(l.text)+'</div>').join('')||'<p class="mu">아직 없습니다.</p>';
 }
-async function refresh(){render(await call('status'))}
+function renderBroker(b){
+  const rows=(b.resv||[]).map(x=>'<div class="row"><div><b>'+esc(x.t)+'</b> '+(x.side==='buy'?'매수':'매도')+' '+x.qty+'주 '+(x.price?'$'+x.price.toFixed(2):'시장가')+'<div class="mu">예약 · '+esc(x.state||'접수')+(x.reason?' · <span class="neg">'+esc(x.reason)+'</span>':'')+(x.mine?' · 에이전트 주문':' · 직접 넣은 주문')+'</div></div>'+(x.mine?'<div class="btns"><button class="ghost" data-cancel="'+esc(x.no)+'">취소</button></div>':'')+'</div>')
+    .concat((b.unfilled||[]).map(x=>'<div class="row"><div><b>'+esc(x.t)+'</b> '+(x.side==='buy'?'매수':'매도')+' 미체결 '+x.left+'/'+x.qty+'주 $'+x.price.toFixed(2)+'<div class="mu">장중 주문 · 한투 앱에서 정리</div></div></div>'));
+  $('#broker').innerHTML=(rows.join('')||'<p class="mu">걸린 주문이 없습니다.</p>')+((b.errors||[]).length?'<p class="mu neg">'+esc(b.errors.join(' / '))+'</p>':'');
+}
+async function refresh(){render(await call('status'));call('broker').then(renderBroker).catch(e=>{$('#broker').innerHTML='<p class="mu neg">'+esc(e.message)+'</p>'})}
 const f=$('#f');
 if(f)f.addEventListener('submit',async e=>{e.preventDefault();PW=$('#pw').value;try{await refresh();$('#login').hidden=true;$('#app').hidden=false}catch(err){$('#lmsg').textContent=err.message}});
 document.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b||!PW)return;
   const msg=$('#amsg');
   try{
-    if(b.dataset.ok){if(!confirm('실제 돈으로 매수 주문을 넣습니다. 승인할까요?'))return;b.disabled=true;const r=await call('approve',{id:b.dataset.ok});alert(r.qty+'주 · $'+r.cost+' (약 '+Math.round(r.krw/1e4)+'만원) '+(r.status==='sent'?'예약 주문을 보냈습니다. 오늘 밤 장 시작에 나갑니다.':'승인했습니다. 오전 10시 이후에 예약 주문을 보냅니다.'))}
+    if(b.dataset.ok){if(!confirm('실제 돈으로 매수 주문을 넣습니다. 승인할까요?'))return;b.disabled=true;const r=await call('approve',{id:b.dataset.ok});alert(r.qty+'주 · $'+r.cost+' (약 '+Math.round(r.krw/1e4)+'만원) '+(r.status==='sent'?'예약 주문을 보냈습니다. 오늘 밤 장 시작에 나갑니다.':r.note?'승인했습니다. '+r.note:'승인했습니다. 오전 10시 이후에 예약 주문을 보냅니다.'))}
     else if(b.dataset.no){b.disabled=true;await call('reject',{id:b.dataset.no})}
+    else if(b.dataset.cancel){if(!confirm('이 예약 주문을 취소할까요?'))return;b.disabled=true;await call('cancel',{no:b.dataset.cancel})}
     else if(b.id==='pause'){render(await call($('#pause').textContent.includes('멈추')?'pause':'resume'));return}
     else if(b.id==='close'){b.disabled=true;msg.textContent='확인 중…';const r=await call('close');msg.textContent=r.skipped?'오늘은 이미 확인했습니다.':'승인 요청 '+(r.created||[]).length+'건 · 청산 '+(r.exits||[]).filter(x=>!x.price).length+'건'+((r.errors||[]).length?' · 오류: '+r.errors.join(', '):'');b.disabled=false}
     await refresh();

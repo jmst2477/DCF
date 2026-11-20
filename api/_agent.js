@@ -11,6 +11,7 @@
 import crypto from "node:crypto";
 import { kisExchange } from "./_kis.js";
 import { newsBlocks } from "./_news.js";
+import { usClosed, kstDate } from "./_market.js";
 
 export const LIMITS = env => ({
   buyKrw: Number(env.AGENT_BUY_KRW) > 0 ? Number(env.AGENT_BUY_KRW) : 5000000,
@@ -98,10 +99,42 @@ export function makeAgent(deps) {
         }
       }
     }
+    // 한투 예약 주문 상태: 거부·취소된 주문은 바로 정리하고 이유를 남긴다
+    const live = orders.filter(o => (o.status === "sent" || o.status === "partial") && o.no);
+    if (live.length && kis.resvList) {
+      try {
+        const from = live.map(o => o.rcit || ymd(kstDate(new Date(o.at)))).sort()[0];
+        const rs = await kis.resvList(from, ymd(kstDate(now())));
+        for (const o of live) {
+          const r = rs.find(x => x.no === o.no);
+          if (!r || (o.filled || 0) > 0) continue;
+          if (r.canceled) { o.status = "canceled"; notes.push(`${o.t} ${o.side === "buy" ? "매수" : "매도"} 예약 주문이 취소됨`); }
+          else if (r.reason && !r.filled) { o.status = "rejected"; o.reason = r.reason; notes.push(`⚠ ${o.t} ${o.side === "buy" ? "매수" : "매도"} 주문 거부: ${r.reason}`); }
+        }
+        // 거부·취소된 매수는 승인 목록에도 표시
+        const gone = live.filter(o => o.side === "buy" && (o.status === "rejected" || o.status === "canceled"));
+        if (gone.length) {
+          const appr = await get(K.appr, []);
+          appr.forEach(a => { const o = gone.find(g => g.t === a.t && g.sig === a.sig); if (o && a.status === "sent") { a.status = o.status === "rejected" ? "failed" : "canceled"; if (o.reason) a.error = o.reason; } });
+          await store.set(K.appr, appr);
+        }
+      } catch (e) { notes.push(`예약 주문 조회 실패: ${e.message || e}`); }
+    }
     // 5일 넘게 안 채워진 주문은 끝난 것으로 (예약 주문은 당일만 유효)
     orders.forEach(o => { if ((o.status === "sent" || o.status === "partial") && addDays(o.sig, 5) < today) o.status = o.filled ? "partial-done" : "expired"; });
     // 실제 잔고보다 많이 가졌다고 적혀 있으면 잔고에 맞춘다 (직접 파신 경우)
     const bal = await kis.balance();
+    // 액면분할·병합: 잔고 수량이 r 배, 평균가가 1/r 배로 바뀌었으면 에이전트 몫도 같이 바꾼다 (안 그러면 손절가가 엉뚱해짐)
+    for (const t of Object.keys(pos)) {
+      const b = bal.find(x => x.t === t), p = pos[t];
+      if (!b || !(b.avg > 0) || !(p.avg > 0) || b.qty === p.qty) continue;
+      const rQty = b.qty / p.qty, rAvg = p.avg / b.avg;
+      if ((rQty >= 1.5 || rQty <= 0.67) && Math.abs(rAvg / rQty - 1) < 0.05) {
+        const r = rAvg;
+        p.qty = Math.round(p.qty * r); p.avg = p.avg / r; p.split = { at: today, r: Math.round(r * 1000) / 1000 };
+        notes.push(`${t} 액면${r > 1 ? "분할" : "병합"} 반영: ${p.qty}주, 평균 $${r2(p.avg)}`);
+      }
+    }
     for (const t of Object.keys(pos)) {
       const b = bal.find(x => x.t === t);
       const real = b ? b.qty : 0;
@@ -133,7 +166,18 @@ export function makeAgent(deps) {
       const b = bal.find(x => x.t === t);
       return s + (b && b.price ? (b.price - p.avg) * p.qty : 0);
     }, 0);
-    const pnl = (month.realized || 0) + unreal;
+    // 실현 손익은 한투 기간손익(수수료·세금 반영)에서 에이전트가 판 종목만 더한다. 조회가 안 되면 직접 계산한 값
+    let realized = month.realized || 0;
+    if (kis.periodProfit) {
+      try {
+        const sold = new Set((await get(K.orders, [])).filter(o => o.side === "sell" && (o.filled || 0) > 0 && String(o.sig || "").slice(0, 7) === m).map(o => o.t));
+        const pp = await kis.periodProfit(m.replace("-", "") + "01", ymd(etDate(now())));
+        realized = r2(pp.rows.filter(r => sold.has(r.t)).reduce((s, r) => s + r.pnl, 0));
+        month = { ...month, realized, kisAll: r2(pp.total), realizedSrc: "한투" };
+        await store.set(K.month, month);
+      } catch { /* 직접 계산값 사용 */ }
+    }
+    const pnl = realized + unreal;
     const stop = month.base > 0 && pnl < -(month.base * L.monthLoss) / 100;
     return { ...month, unreal, pnl, stop };
   }
@@ -142,7 +186,7 @@ export function makeAgent(deps) {
   async function closeStep({ data, origin, force } = {}) {
     const today = etDate(now());
     if (!force && (await store.get(K.closeDone)) === today) return { skipped: "이미 함" };
-    const { pos, bal } = await reconcile();
+    const { pos, bal, notes } = await reconcile();
     const month = await monthCheck(bal, pos);
     const paused = !!(await store.get(K.paused));
     const items = plan(data || {});
@@ -162,6 +206,12 @@ export function makeAgent(deps) {
         const rule = it ? it.rule : p.rule || { sl: null, tp: null };
         const exch = kisExchange(d.exch) || p.exch || "NASD";
         const sl = rule.sl ? p.avg * (1 - rule.sl / 100) : null, tp = rule.tp ? up2(p.avg * (1 + rule.tp / 100)) : null;
+        // 액면분할·병합 앞뒤 3일: 차트(분할 반영)와 평균가(아직 반영 전)가 어긋날 수 있어 매도 판단을 쉰다
+        if (kis.rights && !(p.split && p.split.at >= addDays(today, -5))) {
+          let sp = null;
+          try { sp = (await kis.rights(t, exch, ymd(addDays(today, -3)), ymd(addDays(today, 3)))).find(x => x.code === "14" || x.code === "15"); } catch { /* 조회 안 되면 평소대로 */ }
+          if (sp) { errors.push(`${t}: ${sp.kind}(${sp.date}) 앞뒤라 오늘은 매도 판단을 쉼`); continue; }
+        }
         if (d.time[i] !== today) { // 오늘 장이 없었음 (휴장): 새 판단 없이 익절 지정가만 다음 장에 다시 건다
           if (tp) exits.push({ t, exch, qty: p.qty, price: tp, why: "익절 대기" });
           continue;
@@ -215,7 +265,7 @@ export function makeAgent(deps) {
     if (date === today) await store.set(K.closeDone, today);
 
     // 카톡
-    const lines = [];
+    const lines = notes.filter(n => n.startsWith("⚠") || n.includes("액면"));
     created.forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}${a.news ? `\n  뉴스: ${a.news}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 오늘 밤 장 시작에 자동 매도`));
@@ -232,9 +282,15 @@ export function makeAgent(deps) {
 
   // 주문 보내기 (예약). 성공하면 주문 기록
   async function submit(o) {
+    // 같은 종목·같은 방향 예약 주문이 오늘 이미 한투에 살아 있으면 또 넣지 않는다 (두 번 눌림·재시도 대비)
+    if (kis.resvList) {
+      let dup = null;
+      try { const d = ymd(kstDate(now())); dup = (await kis.resvList(d, d)).find(x => x.t === o.t && x.side === o.side && !x.canceled && !x.reason); } catch { /* 조회 안 되면 그냥 보냄 */ }
+      if (dup) throw new Error(`${o.t} ${o.side === "buy" ? "매수" : "매도"} 예약 주문이 이미 들어가 있어 다시 넣지 않았습니다.`);
+    }
     const r = await kis.reserve(o.side, o.exch, o.t, o.qty, o.price);
     const orders = await get(K.orders, []);
-    orders.push({ ...o, no: r.no, status: "sent", at: now().toISOString() });
+    orders.push({ ...o, no: r.no, rcit: r.rcit || ymd(kstDate(now())), status: "sent", at: now().toISOString() });
     await store.set(K.orders, orders.slice(-200));
     return r;
   }
@@ -242,6 +298,9 @@ export function makeAgent(deps) {
   // ---------- 한국 11시대: 청산 + 승인된 매수 예약 주문 ----------
   async function openStep({ origin } = {}) {
     const done = [], errors = [];
+    // 오늘 밤 미국 장이 휴장이면 주문을 미룬다 (청산 계획·승인된 매수는 그대로 두고 다음 장 날 보냄)
+    const closed = usClosed(kstDate(now()));
+    if (closed) { await log(`오늘 밤 미국 휴장(${closed}) — 주문을 다음 장으로 미룸`); return { done, errors, skipped: `휴장: ${closed}` }; }
     const p = await get(K.plan, null);
     if (p && !p.sent) {
       for (const x of p.exits) {
@@ -290,13 +349,14 @@ export function makeAgent(deps) {
     const cost = qty * a.limit;
     if (cost > bp.usd) throw new Error(`주문 가능 달러가 부족합니다 (필요 $${r2(cost)}, 가능 $${r2(bp.usd)}). 달러를 넣거나 환전해 주세요.`);
     a.qty = qty; a.rate = bp.rate; a.approvedAt = t.toISOString();
-    if (w === "open") {
+    const closed = usClosed(kstDate(t));
+    if (w === "open" && !closed) {
       await submit({ side: "buy", t: a.t, exch: a.exch, qty, price: a.limit, sig: a.sig, sid: a.sid, rule: a.rule, why: "승인" });
       a.status = "sent";
-    } else a.status = "approved"; // 10시 전: 11시대 단계에서 보냄
+    } else { a.status = "approved"; if (closed) a.note = `오늘 밤 미국 휴장(${closed}) — 다음 장 날 보냄`; } // 10시 전이나 휴장: 다음 11시대 단계에서 보냄
     await store.set(K.appr, appr);
-    await log(`매수 승인 ${a.t} ${qty}주 지정가 $${a.limit} (약 ${krw(cost * bp.rate)})${a.status === "sent" ? " → 예약 주문 보냄" : " → 10시 이후 보냄"}`);
-    return { status: a.status, qty, cost: r2(cost), krw: Math.round(cost * bp.rate) };
+    await log(`매수 승인 ${a.t} ${qty}주 지정가 $${a.limit} (약 ${krw(cost * bp.rate)})${a.status === "sent" ? " → 예약 주문 보냄" : closed ? ` → 미국 휴장(${closed}), 다음 장 날 보냄` : " → 10시 이후 보냄"}`);
+    return { status: a.status, qty, cost: r2(cost), krw: Math.round(cost * bp.rate), note: a.note || null };
   }
 
   async function status() {
@@ -307,9 +367,33 @@ export function makeAgent(deps) {
       month: await get(K.month, null), log: (await get(K.log, [])).slice(0, 40),
     };
   }
+  // 에이전트가 넣은 예약 주문 취소 (사이트 버튼)
+  async function cancel(no) {
+    const orders = await get(K.orders, []);
+    const o = orders.find(x => x.no && x.no === no && (x.status === "sent" || x.status === "partial"));
+    if (!o) throw new Error("취소할 수 있는 에이전트 주문이 아닙니다.");
+    await kis.cancelResv(o.rcit || ymd(kstDate(new Date(o.at))), o.no);
+    o.status = "canceled";
+    await store.set(K.orders, orders);
+    if (o.side === "buy") {
+      const appr = await get(K.appr, []);
+      appr.forEach(a => { if (a.t === o.t && a.sig === o.sig && a.status === "sent") a.status = "canceled"; });
+      await store.set(K.appr, appr);
+    }
+    await log(`${o.t} ${o.side === "buy" ? "매수" : "매도"} 예약 주문 취소`);
+    return { ok: true };
+  }
+  // 한투에 실제로 걸려 있는 주문 (어제·오늘 예약 + 장중 미체결). 직접 넣은 주문도 보이지만 취소는 에이전트 주문만
+  async function broker() {
+    const out = { resv: [], unfilled: [], errors: [] };
+    const mine = new Set((await get(K.orders, [])).filter(o => (o.status === "sent" || o.status === "partial") && o.no).map(o => o.no));
+    try { out.resv = (await kis.resvList(ymd(addDays(kstDate(now()), -1)), ymd(kstDate(now())))).filter(x => !x.canceled).map(x => ({ ...x, mine: mine.has(x.no) })); } catch (e) { out.errors.push(`예약 주문: ${e.message || e}`); }
+    try { out.unfilled = await kis.unfilled(); } catch (e) { out.errors.push(`미체결: ${e.message || e}`); }
+    return out;
+  }
   async function setPaused(v) { await store.set(K.paused, !!v); await log(v ? "에이전트 멈춤" : "에이전트 다시 켬"); }
 
-  return { closeStep, openStep, approve, status, setPaused, reconcile, note: log };
+  return { closeStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log };
 }
 
 // 카톡 한 통 200자 제한

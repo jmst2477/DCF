@@ -12,7 +12,8 @@
 
 import crypto from "node:crypto";
 import { checkAll, messages, strategies, plan, libs } from "./_signals.js";
-import { makeReport, reportMessages } from "./_report.js";
+import { makeReport, reportMessages, discoverCandidates, discoverMessage } from "./_report.js";
+import { makeKis, kisConfig } from "./_kis.js";
 import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
 import { dailyBars, summary } from "./prices.js";
 
@@ -27,7 +28,7 @@ const KEY = process.env.KAKAO_REST_API_KEY || "";
 const SECRET = process.env.KAKAO_CLIENT_SECRET || "";
 const K = {
   pw: "dcf:sync2:pw", data: "dcf:sync2:data", fails: "dcf:sync2:fails",
-  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
+  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", discover: "dcf:discover", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
 };
 const MAX_FAILS = 20;
 
@@ -42,6 +43,9 @@ async function redis(...cmd) {
   return j.result;
 }
 const jget = async k => { const v = await redis("GET", k); return v ? JSON.parse(v) : null; };
+// 한투 (키가 있을 때만): 뉴스 예비, 새 후보 종목 조건검색
+const kisStore = { get: jget, set: async (k, v) => { await redis("SET", k, JSON.stringify(v)); } };
+const kisOn = () => !!(kisConfig().ok && URL_ && TOKEN);
 
 const hash = (pw, salt) => crypto.scryptSync(pw, salt, 32).toString("hex");
 function checkPw(pw, stored) {
@@ -136,17 +140,39 @@ async function fred(id) {
   return (await r.text()).trim().split("\n").slice(1).map(l => l.split(",")).map(([date, v]) => ({ date, v: Number(v) })).filter(x => /^\d{4}-\d\d-\d\d$/.test(x.date) && isFinite(x.v));
 }
 // 에이전트 리서치 보고서를 만들어 카톡으로 보냄 (매일 아침 Cron, 사이트의 "리서치 미리 보내기")
-async function runReport() {
+async function runReport(manual = false) {
   const s = await jget(K.data);
   const data = (s && s.data) || {};
   const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA }, { data, pos: (await jget("agent:pos")) || {} });
   const news = await jget(K.news);
   const fresh = news && Date.now() - Date.parse(news.at) < 30 * 3600e3;
-  const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : []);
+  const dsc = await jget(K.discover);
+  // 새 후보는 찾은 날(월요일) 보고서와 직접 미리 보내기 때만 넣는다 (매일 같은 목록 반복 안 함)
+  const dscMsg = dsc && Date.now() - Date.parse(dsc.at) < (manual ? 8 * 864e5 : 30 * 3600e3) ? discoverMessage(dsc) : null;
+  const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : [], dscMsg ? [dscMsg] : []);
   for (const m of msgs) await sendMemo(m);
   await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10),
     regime: r.spy ? r.spy.kind : null, strong: r.strong.map(s => s.ko).join(", ") }));
   return { date: r.date, messages: msgs, sent: msgs.length, errors: r.errors };
+}
+
+// 새 후보 종목 (주 1회, 월요일 Cron · 리서치 미리 보내기 때 일주일 넘었으면)
+async function runDiscover() {
+  if (!kisOn()) return { skipped: "한투 키 없음" };
+  const s = await jget(K.data);
+  const data = (s && s.data) || {};
+  const wl = (Array.isArray(data["dcf-watchlist"]) ? data["dcf-watchlist"] : []).filter(t => typeof t === "string");
+  const kis = makeKis({ store: kisStore });
+  const errors = [];
+  const screen = async () => {
+    const out = [];
+    for (const ex of ["NAS", "NYS"]) { try { out.push(...(await kis.search(ex, { minCapK: 10000000, minPrice: 10 }))); } catch (e) { errors.push(`${ex}: ${e.message || e}`); } }
+    return out;
+  };
+  const r = await discoverCandidates({ screen, bars: (t, range) => dailyBars(t, range) }, { exclude: wl.concat(Object.keys((await jget("agent:pos")) || {})), strats: strategies(data), TA: libs().TA });
+  const saved = { ...r, errors };
+  await redis("SET", K.discover, JSON.stringify(saved));
+  return saved;
 }
 
 // 관심 종목 뉴스 제목을 모아 Claude 로 분석해 저장 (매일 미국 장 마감 무렵 Cron, 리서치 미리 보내기 전에도)
@@ -162,7 +188,14 @@ async function runNews() {
   await Promise.all(Array.from({ length: Math.min(5, wl.length) }, async () => {
     while (next < wl.length) {
       const t = wl[next++];
-      try { const news = await tickerNews(t); if (news.length) items.push({ t, news, star: star[t], held: !!pos[t] }); } catch (e) { errors.push(`${t}: ${e.message || e}`); }
+      let news = [], err = null;
+      try { news = await tickerNews(t); } catch (e) { err = e; }
+      // 야후가 막히거나 비었으면 한투 해외뉴스 제목으로
+      if (!news.length && kisOn()) {
+        try { const cut = Date.now() - 3 * 864e5; news = (await makeKis({ store: kisStore }).news(t)).filter(n => !n.at || n.at > cut).slice(0, 8); err = null; } catch (e) { err = err || e; }
+      }
+      if (news.length) items.push({ t, news, star: star[t], held: !!pos[t] });
+      else if (err) errors.push(`${t}: ${err.message || err}`);
     }
   }));
   const count = items.reduce((n, x) => n + x.news.length, 0);
@@ -216,6 +249,12 @@ export default async function handler(req, res) {
       if (!(URL_ && TOKEN)) return res.status(200).json({ skipped: "no store" });
       const r = await runNews();
       return res.status(200).json({ count: r.count, tickers: (r.tickers || []).length, error: r.error || null });
+    }
+    // 새 후보 종목 찾기 (Vercel Cron, 월요일)
+    if (req.method === "GET" && q.action === "discover") {
+      if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "unauthorized" });
+      const r = await runDiscover();
+      return res.status(200).json({ picks: r.picks ? r.picks.length : 0, scanned: r.scanned || 0, skipped: r.skipped || null });
     }
     // 카카오 로그인 후 돌아오는 곳
     if (req.method === "GET" && (q.code || q.error)) {
@@ -273,7 +312,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
     if (body.action === "check") return res.status(200).json(await runCheck(true));
-    if (body.action === "report") return res.status(200).json(await runReport());
+    if (body.action === "report") return res.status(200).json(await runReport(true));
+    if (body.action === "discover") {
+      // 일주일 안에 찾았으면 다시 안 함
+      const d = await jget(K.discover);
+      if (d && d.picks && Date.now() - Date.parse(d.at) < 6.5 * 864e5 && !body.force) return res.status(200).json({ cached: true, picks: d.picks.length });
+      const r = await runDiscover();
+      return res.status(200).json({ picks: r.picks ? r.picks.length : 0, skipped: r.skipped || null });
+    }
     if (body.action === "news") {
       // 오늘(30시간 안) 이미 분석했으면 다시 안 함 (Claude 비용)
       const n = await jget(K.news);

@@ -1887,7 +1887,11 @@
   async function kakaoDo(action, btn) {
     btn.disabled = true;
     try {
-      if (action === 'report') { $(KK.msg).textContent = '뉴스 모으고 분석하는 중… (1분쯤)'; try { await kakaoCall('news'); } catch (e) { /* 뉴스 없이도 보고서는 보냄 */ } }
+      if (action === 'report') {
+        $(KK.msg).textContent = '뉴스 모으고 분석하는 중… (1분쯤)'; try { await kakaoCall('news'); } catch (e) { /* 뉴스 없이도 보고서는 보냄 */ }
+        $(KK.msg).textContent = '새 후보 종목 찾는 중…'; try { await kakaoCall('discover'); } catch (e) { /* 없어도 보고서는 보냄 */ }
+        $(KK.msg).textContent = '보고서 만드는 중…';
+      }
       const j = await kakaoCall(action);
       if (action === 'start') { location.href = j.url; return; }
       if (action === 'report') {
