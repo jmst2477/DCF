@@ -88,7 +88,7 @@ export const newsBlocks = a => !!(a && (a.action === "매수 보류" || (a.senti
 // 카톡 문구
 export function newsMessages(res) {
   if (!res) return [];
-  if (res.error) return [`📰 뉴스 분석: ${res.error}`.slice(0, 200)];
+  if (res.error) return [`📰 뉴스 분석: ${res.error}`];
   const out = [];
   const pick = (res.tickers || []).filter(x => x.importance >= 2 || x.action !== "관망")
     .sort((a, b) => b.importance - a.importance);
@@ -100,6 +100,6 @@ export function newsMessages(res) {
   });
   if (!pick.length) cur += "\n눈에 띄는 뉴스가 없습니다.";
   out.push(cur);
-  if (res.strategy) out.push(`🗺 오늘 전략 (뉴스 반영)\n${res.market ? res.market + "\n" : ""}${res.strategy}`.slice(0, 200));
-  return out.slice(0, 3);
+  if (res.strategy) out.push(`🗺 오늘 전략 (뉴스 반영)\n${res.market ? res.market + "\n" : ""}${res.strategy}`);
+  return out; // 200자 넘는 건 보낼 때 나눠 보냄
 }

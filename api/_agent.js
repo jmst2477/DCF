@@ -404,5 +404,5 @@ async function sendChunks(send, head, lines, tail, origin) {
   lines.forEach(l => { if ((cur + "\n" + l).length > 185) { out.push(cur); cur = l; } else cur += "\n" + l; });
   if ((cur + tail).length <= 200) cur += tail; else { out.push(cur); cur = tail.trim(); }
   out.push(cur);
-  for (const m of out.filter(Boolean).slice(0, 6)) await send(m, link);
+  for (const m of out.filter(Boolean)) await send(m, link);
 }
