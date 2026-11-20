@@ -1,5 +1,5 @@
 // 한국투자증권(KIS) Open API — 미국 주식 주문·조회만 쓴다. (한투 Open API에는 출금 기능이 없다)
-// Vercel 환경 변수: KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT(예: 12345678-01)
+// Vercel 환경 변수: KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT(예: 12345678-01) (2026-11-20 등록)
 // 접근 토큰은 하루짜리이고 1분에 한 번만 새로 받을 수 있어 서버 저장소(Redis)에 보관해 같이 쓴다.
 // 필드 이름은 한투 공식 예제(github.com/koreainvestment/open-trading-api, examples_llm/overseas_stock)를 따랐다.
 // (파일 이름이 _ 로 시작해서 Vercel 이 주소로 열지 않는다)
