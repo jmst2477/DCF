@@ -47,7 +47,20 @@ export function makeKis({ fetchImpl = fetch, store, cfg = kisConfig() } = {}) {
     return j.access_token;
   }
 
+  // 초당 호출 한도(EGW00201, 새 앱은 처음 며칠 더 낮음)에 걸리면 잠깐 쉬고 다시. 모든 호출 사이에 최소 간격도 둔다
+  let lastAt = 0;
   async function call(method, path, trId, params, trCont = "") {
+    for (let i = 0; ; i++) {
+      const wait = lastAt + 350 - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      lastAt = Date.now();
+      try { return await call1(method, path, trId, params, trCont); } catch (e) {
+        if (i < 4 && /초당|EGW00201|EGW00215/.test(String(e.message))) { await new Promise(r => setTimeout(r, 1000 * (i + 1))); continue; }
+        throw e;
+      }
+    }
+  }
+  async function call1(method, path, trId, params, trCont = "") {
     const headers = {
       "content-type": "application/json; charset=utf-8",
       authorization: "Bearer " + (await token()),
