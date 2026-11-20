@@ -14,6 +14,7 @@ import crypto from "node:crypto";
 import { checkAll, messages, strategies, plan, libs } from "./_signals.js";
 import { makeReport, reportMessages, discoverCandidates, discoverMessage } from "./_report.js";
 import { makeKis, kisConfig } from "./_kis.js";
+import { splitMemo } from "./_memo.js";
 import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
 import { dailyBars, summary } from "./prices.js";
 
@@ -104,9 +105,13 @@ async function accessToken() {
   await redis("SET", K.tok, JSON.stringify(t));
   return t;
 }
+// 200자가 넘으면 줄 단위로 나눠 여러 통으로 보낸다
 export async function sendMemo(text, link) {
+  for (const part of splitMemo(text)) await sendMemo1(part, link);
+}
+async function sendMemo1(text, link) {
   const t = await accessToken();
-  const tpl = { object_type: "text", text: text.slice(0, 200), link: { web_url: link || t.origin, mobile_web_url: link || t.origin }, button_title: "사이트 열기" };
+  const tpl = { object_type: "text", text, link: { web_url: link || t.origin, mobile_web_url: link || t.origin }, button_title: "사이트 열기" };
   const r = await fetch("https://kapi.kakao.com/v2/api/talk/memo/default/send", {
     method: "POST",
     headers: { Authorization: `Bearer ${t.access}`, "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },

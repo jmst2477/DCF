@@ -183,7 +183,7 @@ export function reportMessages(r) {
   if (m5.length) out.push(`🔁 신호 점검\n${m5.join("\n")}`);
   const o = r.overall;
   if (o) out.push(`🧭 종합평가: ${o.level} (점수 ${o.score > 0 ? "+" : ""}${o.score})\n${o.action}\n근거: ${o.why.join(" · ") || "-"}\n※ 규칙으로 계산한 참고값이며 투자 판단은 본인 몫입니다.`);
-  return out.map(m => (m.length > 200 ? m.slice(0, 197) + "…" : m));
+  return out; // 200자 넘는 건 보낼 때 나눠 보냄 (sendMemo)
 }
 
 // 새 후보 종목 찾기 (주 1회): 한투 조건검색(시가총액 100억 달러 이상·주가 10달러 이상) → 관심 목록 밖 큰 종목 중
@@ -218,7 +218,7 @@ export function discoverMessage(dsc) {
   if (!dsc.picks.length) return [`🔎 이번 주 새 후보: ${dsc.scanned}종목을 봤지만 조건(추세·상대강도·고점 근처)을 다 넘는 종목이 없습니다.`];
   const lines = dsc.picks.map(x => {
     const l = `${x.t}${x.name ? ` ${String(x.name).slice(0, 14)}` : ""}\n  3개월 S&P대비 ${pct(x.rs3, 0)} · 1년 고점 ${x.dist > -0.005 ? "근처" : pct(x.dist, 0)}${x.best ? `\n  잘 맞는 신호: ${x.best.name} ${pct(x.best.ret, 0)}` : ""}`;
-    return l.length > 180 ? l.slice(0, 179) + "…" : l;
+    return l;
   });
   const out = [];
   let cur = `🔎 이번 주 새로 볼 종목 (관심 목록 밖, 시총 100억$↑, 상승 추세)`;

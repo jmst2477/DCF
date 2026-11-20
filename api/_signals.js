@@ -131,5 +131,5 @@ export function messages(check, { force } = {}) {
   });
   if ((cur + "\n" + tail).length <= 200) cur += "\n" + tail;
   out.push(cur);
-  return out.slice(0, 5);
+  return out;
 }
