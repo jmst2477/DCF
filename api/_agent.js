@@ -10,6 +10,7 @@
 
 import crypto from "node:crypto";
 import { kisExchange } from "./_kis.js";
+import { newsBlocks } from "./_news.js";
 
 export const LIMITS = env => ({
   buyKrw: Number(env.AGENT_BUY_KRW) > 0 ? Number(env.AGENT_BUY_KRW) : 5000000,
@@ -177,6 +178,10 @@ export function makeAgent(deps) {
     // 2) ★ 종목의 새 매수 신호
     const appr = (await get(K.appr, [])).filter(a => a.status === "pending" || a.status === "approved");
     const ordersOpen = (await get(K.orders, [])).filter(o => o.side === "buy" && (o.status === "sent" || o.status === "partial"));
+    // 뉴스 분석 (하루 안): 중요한 악재가 있으면 매수 승인 요청을 만들지 않는다
+    const news = await store.get("dcf:news");
+    const newsOk = news && news.tickers && now().getTime() - Date.parse(news.at) < 30 * 3600e3;
+    const newsOf = t => (newsOk ? news.tickers.find(x => x.t === t) : null);
     const busy = t => pos[t] || appr.some(a => a.t === t) || ordersOpen.some(o => o.t === t);
     for (const it of items) {
       try {
@@ -188,7 +193,7 @@ export function makeAgent(deps) {
         if (!(sim.out.buy[i] && !sim.pos)) continue;
         const exch = kisExchange(d.exch);
         const why = paused ? "에이전트 멈춤" : month.stop ? `이번 달 손실 한도(-${L.monthLoss}%)` : busy(it.t) ? "이미 보유·주문 중"
-          : !exch ? `거래소 모름(${d.exch})` : buys.filter(b => !b.skip).length >= L.maxBuys ? `하루 ${L.maxBuys}건 한도` : null;
+          : !exch ? `거래소 모름(${d.exch})` : newsBlocks(newsOf(it.t)) ? `뉴스 악재: ${newsOf(it.t).summary}` : buys.filter(b => !b.skip).length >= L.maxBuys ? `하루 ${L.maxBuys}건 한도` : null;
         buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], exch, skip: why });
       } catch (e) { errors.push(`${it.t}: ${e.message || e}`); }
     }
@@ -197,7 +202,8 @@ export function makeAgent(deps) {
       const limit = r2(b.close * (1 + L.slip / 100));
       let est = null;
       try { const bp = await kis.buyingPower(b.exch, b.t, limit); if (bp.rate > 0) est = Math.floor(L.buyKrw / bp.rate / limit); } catch { /* 승인 때 다시 계산 */ }
-      const a = { id: crypto.randomBytes(6).toString("hex"), t: b.t, sid: b.sid, rule: b.rule, name: b.name, exch: b.exch, sig: today, close: b.close, limit, est,
+      const nw = newsOf(b.t);
+      const a = { id: crypto.randomBytes(6).toString("hex"), t: b.t, sid: b.sid, rule: b.rule, name: b.name, news: nw ? `${nw.sentiment} · ${nw.summary}` : null, exch: b.exch, sig: today, close: b.close, limit, est,
         status: "pending", created: now().toISOString(), deadline: approvalDeadline(now()) };
       created.push(a);
     }
@@ -209,9 +215,10 @@ export function makeAgent(deps) {
 
     // 카톡
     const lines = [];
-    created.forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}`));
+    created.forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}${a.news ? `\n  뉴스: ${a.news}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 오늘 밤 장 시작에 자동 매도`));
+    Object.keys(pos).forEach(t => { const n = newsOf(t); if (n && n.action === "보유 점검") lines.push(`⚠ ${t} 보유 중 뉴스 악재: ${n.summary} (자동 매도는 신호·손절대로)`); });
     if (month.stop) lines.push(`⚠ 이번 달 손익 $${r2(month.pnl)} — 새 매수 멈춤`);
     if (lines.length && send) {
       const head = `🤖 에이전트 ${today} 종가`;

@@ -1887,6 +1887,7 @@
   async function kakaoDo(action, btn) {
     btn.disabled = true;
     try {
+      if (action === 'report') { $(KK.msg).textContent = '뉴스 모으고 분석하는 중… (1분쯤)'; try { await kakaoCall('news'); } catch (e) { /* 뉴스 없이도 보고서는 보냄 */ } }
       const j = await kakaoCall(action);
       if (action === 'start') { location.href = j.url; return; }
       if (action === 'report') {
