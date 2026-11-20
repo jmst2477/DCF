@@ -51,6 +51,7 @@ export function toBars(res) {
     out.close.push(c);
     out.volume.push(q.volume[i] ?? 0);
   });
+  out.exch = (res.meta && res.meta.exchangeName) || null; // 주문할 거래소 (api/_kis.js kisExchange)
   return out;
 }
 

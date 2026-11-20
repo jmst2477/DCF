@@ -18,6 +18,7 @@ function load() {
   lib = sandbox.window;
   return lib;
 }
+export const libs = load;
 
 // js/app.js 의 simulate() 와 같은 계산 (다음 봉 시가 체결, 보유 중엔 매수 안 함, 손절·익절)
 export function simulate(d, strat, rule, TA) {
