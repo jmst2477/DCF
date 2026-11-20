@@ -212,9 +212,17 @@ export async function discoverCandidates(deps, { exclude = [], strats = [], TA, 
   })).filter(r => r && !r.error);
   return { at: new Date().toISOString(), scanned: list.length, picks: rows.sort((a, b) => b.score - a.score).slice(0, 5) };
 }
+// 카톡 한 통 200자라 종목이 많으면 여러 통으로 나눈다 (잘리지 않게). 반환: 메시지 배열
 export function discoverMessage(dsc) {
-  if (!dsc || !dsc.picks) return null;
-  if (!dsc.picks.length) return `🔎 이번 주 새 후보: ${dsc.scanned}종목을 봤지만 조건(추세·상대강도·고점 근처)을 다 넘는 종목이 없습니다.`;
-  const m = `🔎 이번 주 새로 볼 종목 (관심 목록 밖, 시총 100억$↑)\n` + dsc.picks.map(x => `${x.t} 3개월 S&P대비 ${pct(x.rs3, 0)} · 고점 ${pct(x.dist, 0)}${x.best ? ` · ${x.best.name} ${pct(x.best.ret, 0)}` : ""}`).join("\n");
-  return m.length > 200 ? m.slice(0, 197) + "…" : m;
+  if (!dsc || !dsc.picks) return [];
+  if (!dsc.picks.length) return [`🔎 이번 주 새 후보: ${dsc.scanned}종목을 봤지만 조건(추세·상대강도·고점 근처)을 다 넘는 종목이 없습니다.`];
+  const lines = dsc.picks.map(x => {
+    const l = `${x.t}${x.name ? ` ${String(x.name).slice(0, 14)}` : ""}\n  3개월 S&P대비 ${pct(x.rs3, 0)} · 1년 고점 ${x.dist > -0.005 ? "근처" : pct(x.dist, 0)}${x.best ? `\n  잘 맞는 신호: ${x.best.name} ${pct(x.best.ret, 0)}` : ""}`;
+    return l.length > 180 ? l.slice(0, 179) + "…" : l;
+  });
+  const out = [];
+  let cur = `🔎 이번 주 새로 볼 종목 (관심 목록 밖, 시총 100억$↑, 상승 추세)`;
+  lines.forEach(l => { if ((cur + "\n" + l).length > 195) { out.push(cur); cur = l; } else cur += "\n" + l; });
+  out.push(cur);
+  return out;
 }

@@ -148,8 +148,8 @@ async function runReport(manual = false) {
   const fresh = news && Date.now() - Date.parse(news.at) < 30 * 3600e3;
   const dsc = await jget(K.discover);
   // 새 후보는 찾은 날(월요일) 보고서와 직접 미리 보내기 때만 넣는다 (매일 같은 목록 반복 안 함)
-  const dscMsg = dsc && Date.now() - Date.parse(dsc.at) < (manual ? 8 * 864e5 : 30 * 3600e3) ? discoverMessage(dsc) : null;
-  const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : [], dscMsg ? [dscMsg] : []);
+  const dscMsg = dsc && Date.now() - Date.parse(dsc.at) < (manual ? 8 * 864e5 : 30 * 3600e3) ? discoverMessage(dsc) : [];
+  const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : [], dscMsg);
   for (const m of msgs) await sendMemo(m);
   await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10),
     regime: r.spy ? r.spy.kind : null, strong: r.strong.map(s => s.ko).join(", ") }));
