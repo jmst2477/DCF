@@ -85,7 +85,7 @@ export default async function handler(req, res) {
         // 한투 접속 실패 등: 기록 남기고 카톡으로 알림
         const m = `⚠ 에이전트 ${q.step === "open" ? "예약 주문" : "종가 확인"} 실패: ${String((e && e.message) || e)}`;
         await A.note(m).catch(() => {});
-        await sendMemo(m.slice(0, 200), originOf(req) + "/api/agent").catch(() => {});
+        await sendMemo(m, originOf(req) + "/api/agent").catch(() => {});
         throw e;
       }
     }
