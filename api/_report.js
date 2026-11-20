@@ -136,7 +136,28 @@ export async function makeReport(deps, { data = {}, pos = {} } = {}) {
   const now = deps.now ? deps.now() : new Date();
   const soon = rows.filter(r => r.earnings && r.star && Date.parse(r.earnings) - now.getTime() < 8 * 864e5 && Date.parse(r.earnings) >= now.getTime() - 864e5);
 
-  return { date, spy, qqq, vix, vixTxt, sectors, strong, weak, rates, rows, recs, better: rows.filter(r => r.better), soon, errors };
+  const out = { date, spy, qqq, vix, vixTxt, sectors, strong, weak, rates, rows, recs, better: rows.filter(r => r.better), soon, errors };
+  out.overall = overallOf(out);
+  return out;
+}
+
+// 종합평가: 시장 국면 ±2, 나스닥 ±1, VIX +1~-2, 금리·유동성 ±1, 200일선 위 섹터 수 ±1 → 합계로 4단계
+export function overallOf(r) {
+  const why = [];
+  let s = 0;
+  const reg = { 강세장: 2, "횡보·전환": 0, 약세장: -2 };
+  if (r.spy) { s += reg[r.spy.kind]; why.push(`S&P ${r.spy.kind}`); }
+  if (r.qqq) { s += reg[r.qqq.kind] / 2; }
+  if (r.vix != null) { const v = r.vix < 15 ? 1 : r.vix < 20 ? 0 : r.vix < 30 ? -1 : -2; s += v; if (v) why.push(`VIX ${r.vixTxt}`); }
+  const m = { 우호적: 1, 중립: 0, 부담: -1 }[r.rates.macroTxt] || 0;
+  s += m; if (m) why.push(`금리·유동성 ${r.rates.macroTxt}`);
+  const up = r.sectors.filter(x => x.above).length;
+  if (r.sectors.length) { const b = up >= 8 ? 1 : up <= 3 ? -1 : 0; s += b; why.push(`섹터 ${up}/${r.sectors.length}개 상승 추세`); }
+  const [level, action] = s >= 3 ? ["공격", "매수 신호는 대부분 승인해도 좋은 환경"]
+    : s >= 0 ? ["보통", "강한 섹터·추천 종목 신호 위주로 골라서 승인"]
+    : s >= -2 ? ["조심", "승인을 줄이고 손절을 지키기"]
+    : ["방어", "새 매수는 쉬는 것을 권함 (청산은 계속)"];
+  return { score: s, level, action, why };
 }
 
 // 카톡 메시지 (한 통 200자)
@@ -160,5 +181,7 @@ export function reportMessages(r) {
   r.better.slice(0, 3).forEach(x => m5.push(`${x.t}: 지금 ★ ${x.cur.name} ${pct(x.cur.ret, 0)} → ${x.best.name} ${pct(x.best.ret, 0)} 이 2년간 더 좋았음`));
   r.soon.slice(0, 3).forEach(x => m5.push(`⚠ ${x.t} 실적 발표 ${x.earnings.slice(5).replace("-", "/")} — 매수 승인 전에 확인`));
   if (m5.length) out.push(`🔁 신호 점검\n${m5.join("\n")}`);
+  const o = r.overall;
+  if (o) out.push(`🧭 종합평가: ${o.level} (점수 ${o.score > 0 ? "+" : ""}${o.score})\n${o.action}\n근거: ${o.why.join(" · ") || "-"}\n※ 규칙으로 계산한 참고값이며 투자 판단은 본인 몫입니다.`);
   return out.map(m => (m.length > 200 ? m.slice(0, 197) + "…" : m));
 }
