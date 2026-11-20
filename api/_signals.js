@@ -58,7 +58,7 @@ const arr = v => (Array.isArray(v) ? v : []);
 const obj = v => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 
 // 동기화 데이터(브라우저 localStorage 와 같은 이름)로 쓸 수 있는 신호 목록과 종목별 신호를 정한다
-export function plan(data) {
+export function strategies(data) {
   const W = load();
   const off = arr(data["dcf-hidden-items"]).concat(arr(data["dcf-deleted-items"]));
   const strats = (W.STRATEGIES || []).filter(s => !off.includes(s.id));
@@ -69,6 +69,11 @@ export function plan(data) {
       strats.push({ id: it.id, name: it.name, commission: 0.0005, run: d => c.run(d) });
     } catch { /* 사이트에서도 못 읽는 코드면 건너뜀 */ }
   });
+  return strats;
+}
+
+export function plan(data) {
+  const strats = strategies(data);
   const byId = id => strats.find(s => s.id === id);
   const cur = byId(data["dcf-strategy-id"]) || strats[0];
   const tstrat = obj(data["dcf-ticker-strat"]), sltp = obj(data["dcf-sltp"]);
