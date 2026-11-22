@@ -376,7 +376,7 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .bt-search table td, .bt-search table th { white-space: nowrap; }
 .bulk-list { list-style: none; margin: 4px 0 8px; padding: 0; max-height: 260px; overflow-y: auto; }
 .bulk-list li { padding: 3px 0; }
-#bt-bulk .bulk-list label, #bt-bulk .bulk-all { display: flex; flex-direction: row; justify-content: flex-start; text-align: left; margin: 0; font-weight: 400; color: var(--text); align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+#bt-bulk .bulk-list label, #bt-bulk .bulk-all, #bt-opt .bulk-list label, #bt-opt .bulk-all { display: flex; flex-direction: row; justify-content: flex-start; text-align: left; margin: 0; font-weight: 400; color: var(--text); align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .bulk-list .muted { font-size: 12px; }
 .bulk-actions { display: flex; align-items: center; gap: 8px; }
 .chip.find { white-space: nowrap; flex-shrink: 0; border-style: dashed; color: var(--accent); background: transparent; }
