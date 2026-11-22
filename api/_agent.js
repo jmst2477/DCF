@@ -322,6 +322,10 @@ export function makeAgent(deps) {
     const strats = deps.strategies ? deps.strategies(data || {}) : [];
     if (!strats.length) return { skipped: "쓸 신호 없음" };
     const fee = feeOf(data || {});
+    // 사이트 '손절·익절 찾기'의 최소 기준(거래 수·승률)을 따름. 없으면 5번·65%
+    const btSet = (data && data["dcf-backtest"]) || {};
+    const minN = Number.isInteger(btSet.minN) && btSet.minN >= 1 ? btSet.minN : SCAN.n;
+    const minRate = typeof btSet.minRate === "number" && btSet.minRate >= 0 && btSet.minRate <= 100 ? btSet.minRate / 100 : SCAN.rate;
     const wl = new Set((Array.isArray(data && data["dcf-watchlist"]) ? data["dcf-watchlist"] : []).map(t => String(t).toUpperCase()));
     const pos = await get(K.pos, {});
     const apprAll = await get(K.appr, []);
@@ -346,7 +350,7 @@ export function makeAgent(deps) {
             try { sim = simulate(d, s, { sl: null, tp: null }, TA, { fee }); } catch { continue; }
             if (!(sim.out.buy[i] && !sim.pos)) continue;
             const s5 = tradeStats(d, sim, 5);
-            if (!s5 || s5.rate < SCAN.rate || s5.n < SCAN.n) continue;
+            if (!s5 || s5.rate < minRate - 1e-9 || s5.n < minN) continue;
             const s1 = tradeStats(d, sim, 1);
             const stat = { rate: s5.rate, n: s5.n, total: s5.total, y1: s1 ? s1.total : null };
             if (!best || stat.rate > best.stat.rate || (stat.rate === best.stat.rate && stat.total > best.stat.total)) best = { t, sid: s.id, name: s.name, stat, close: d.close[i], exch: kisExchange(d.exch) };

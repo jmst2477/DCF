@@ -318,7 +318,10 @@
   const FEE_DEF = 0.25;
   // years: 1·3·5 = 최근 몇 년, 0 = 직접 정한 기간 (from ~ to, to 가 비면 마지막 날까지)
   const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
-  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '', fee: typeof o.fee === 'number' && o.fee >= 0 && o.fee <= 3 ? o.fee : FEE_DEF }; } catch (e) { return { years: 5, from: '', to: '', fee: FEE_DEF }; } })();
+  // minN·minRate: '손절·익절 찾기'에 보여 줄 최소 기준 (거래 몇 번 이상, 승률 몇 % 이상). 기본 5번·65%
+  const MIN_N_DEF = 5, MIN_RATE_DEF = 65;
+  const okN = v => Number.isInteger(v) && v >= 1 && v <= 100, okR = v => typeof v === 'number' && v >= 0 && v <= 100;
+  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '', fee: typeof o.fee === 'number' && o.fee >= 0 && o.fee <= 3 ? o.fee : FEE_DEF, minN: okN(o.minN) ? o.minN : MIN_N_DEF, minRate: okR(o.minRate) ? o.minRate : MIN_RATE_DEF }; } catch (e) { return { years: 5, from: '', to: '', fee: FEE_DEF, minN: MIN_N_DEF, minRate: MIN_RATE_DEF }; } })();
   const saveBt = () => lsSet(BT_KEY, bt);
   // 손절·익절은 종목+신호마다 따로 저장: { AEHR: { 'stoch-x': {sl:10, tp:30} } }. 없으면 안 씀
   // (예전 형식 { AEHR: {sl, tp} } 은 아래 migrateSltp 에서 그 종목의 적용 신호 칸으로 옮김)
@@ -606,12 +609,12 @@
     // 손절·익절이 한 번도 안 걸려 결과가 똑같은 조합은 하나만 (더 단순한 설정, 즉 '안 씀'에 가까운 쪽을 남김)
     const sig = x => [x.st.n, x.st.total.toFixed(6), x.st.mdd.toFixed(6)].join('|'), seen = new Set();
     const uniq = rows.filter(x => { const k = sig(x); if (seen.has(k)) return false; seen.add(k); return true; });
-    // 거래가 너무 적으면 운일 수 있어서 거래 5번 이상, 그리고 승률 65% 이상인 조합만 보여 줌
-    const MIN_TRADES = 5, MIN_RATE = 0.65, good = x => x.st.n >= MIN_TRADES && x.st.rate >= MIN_RATE - 1e-9;
+    // 거래가 너무 적으면 운일 수 있어서 최소 기준(기본 거래 5번 이상, 승률 65% 이상)을 넘는 조합만 보여 줌. 기준은 위 칸에서 바꿈
+    const MIN_TRADES = bt.minN, MIN_RATE = bt.minRate / 100, good = x => x.st.n >= MIN_TRADES && x.st.rate >= MIN_RATE - 1e-9;
     const pool = uniq.filter(good);
     if (!pool.length) {
       const most = Math.max(...uniq.map(x => x.st.n)), bestRate = Math.max(...uniq.filter(x => x.st.n >= MIN_TRADES).map(x => x.st.rate), 0);
-      box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · ${esc(btName())}</b><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div><p class="muted small">거래 ${MIN_TRADES}번 이상, 승률 ${Math.round(MIN_RATE * 100)}% 이상인 손절·익절 조합이 없습니다 (${most >= MIN_TRADES ? `거래 ${MIN_TRADES}번 이상 중 가장 높은 승률 ${Math.round(bestRate * 100)}%` : `가장 많은 조합도 거래 ${most}번`}). 기간을 바꾸거나 다른 신호를 골라 보세요.</p>`;
+      box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · ${esc(btName())}</b><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>${minBox()}<p class="muted small">거래 ${MIN_TRADES}번 이상, 승률 ${Math.round(MIN_RATE * 100)}% 이상인 손절·익절 조합이 없습니다 (${most >= MIN_TRADES ? `거래 ${MIN_TRADES}번 이상 중 가장 높은 승률 ${Math.round(bestRate * 100)}%` : `가장 많은 조합도 거래 ${most}번`}). 기간을 바꾸거나 다른 신호를 골라 보세요.</p>`;
       return;
     }
     pool.sort((a, b) => b.st.total - a.st.total);
@@ -632,13 +635,25 @@
     // 1,000만원을 넣고 매번 전부 다시 넣었다면 (수수료 포함) 기간 끝에 얼마가 되는지
     const won = v => `${Math.round(1000 * (1 + v)).toLocaleString('ko-KR')}만원`;
     const mTxt = v => `<span class="money"><b>${won(v)}</b> <span class="chg ${v >= 0 ? 'up' : 'down'} small">${v >= 0 ? '+' : ''}${Math.round(1000 * v).toLocaleString('ko-KR')}만</span></span>`;
-    box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · ${esc(btName())}</b> <span class="muted small">손절 ${SL_GRID.length} × 익절 ${TP_GRID.length} = ${SL_GRID.length * TP_GRID.length}가지 조합 계산</span><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>
+    box.innerHTML = `<div class="bt-search-head"><b>${esc(t)} · ${esc(s.name)} · ${esc(btName())}</b> <span class="muted small">손절 ${SL_GRID.length} × 익절 ${TP_GRID.length} = ${SL_GRID.length * TP_GRID.length}가지 조합 계산</span><button type="button" class="ghost mini" data-bt-close>닫기 ✕</button></div>${minBox()}
       <div class="table-scroll"><table class="grid"><thead><tr><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="처음에 1,000만원을 넣고 살 때마다 전부 넣었다면 (수수료 포함)">1,000만원이면</th><th>최대 낙폭</th>${recent ? '<th title="같은 조합으로 최근 1년만 따로 계산">최근 1년</th>' : ''}<th></th><th></th></tr></thead><tbody>${show.map(([x, tag]) => `
         <tr><td>${x.sl ? '-' + x.sl + '%' : '안 씀'}</td><td>${x.tp ? '+' + x.tp + '%' : '안 씀'}</td><td>${x.st.n}</td><td>${Math.round(x.st.rate * 100)}%</td><td>${pr(x.st.total)}</td><td>${mTxt(x.st.total)}</td><td>${pr(x.st.mdd)}</td>${recent ? `<td>${rTxt(x)}</td>` : ''}
         <td class="muted small">${tag}</td><td>${x === cur && tstrat[t] === s.id ? '<button type="button" class="mini applied" disabled title="지금 이 종목에 적용된 손절·익절입니다">✓ 적용 중</button>' : `<button type="button" class="ghost mini" data-bt-apply="${x.sl || ''},${x.tp || ''}">적용</button>`}</td></tr>`).join('')}</tbody></table></div>
       <p class="muted small">같은 기간 그냥 들고 있었다면 ${pr(base ? base.st.hold : rows[0].st.hold)} (1,000만원 → ${won(base ? base.st.hold : rows[0].st.hold)}). '1,000만원이면'은 처음에 1,000만원을 넣고 살 때마다 가진 돈을 전부 넣었다고 본 금액입니다 (수수료 포함, 세금 제외). 지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 1위와 비슷한 성적이 나오는 조합이 여럿이면 그 근처 값이 더 믿을 만합니다.${recent ? ` <b>최근 1년</b> 칸이 마이너스이거나 '손절·익절 안 씀'(최근 1년 ${base1 ? pr(base1.total) : '거래 없음'})보다 못하면, 예전 차트에만 맞춘 값일 수 있으니 조심하세요.` : ''} 거래 ${MIN_TRADES}번 이상, 승률 ${Math.round(MIN_RATE * 100)}% 이상인 조합만 보여 줍니다.</p>`;
   }
   $('#bt-find').addEventListener('click', findSlTp);
+  // 최소 기준 칸 (거래 수·승률). 바꾸면 저장하고 바로 다시 계산. 에이전트의 '큰 종목 찾기'도 이 기준을 씀
+  function minBox() {
+    const def = bt.minN === MIN_N_DEF && bt.minRate === MIN_RATE_DEF;
+    return `<div class="bt-min small"><b>최소 기준</b> 거래 <input type="number" min="1" max="100" step="1" value="${bt.minN}" data-bt-min="n">번 이상 · 승률 <input type="number" min="0" max="100" step="1" value="${bt.minRate}" data-bt-min="rate">% 이상${def ? ' <span class="muted">(기본값)</span>' : ' <button type="button" class="ghost mini" data-bt-min-reset>기본값(5번·65%)</button>'}</div>`;
+  }
+  $('#bt-search').addEventListener('change', e => {
+    const i = e.target.closest('[data-bt-min]');
+    if (!i) return;
+    const v = Number(i.value);
+    if (i.dataset.btMin === 'n') { if (okN(v)) bt.minN = v; } else if (okR(v)) bt.minRate = v;
+    saveBt(); findSlTp();
+  });
   // "여러 종목 풀기": 손절·익절이나 ★(적용 신호)가 저장된 종목을 골라 한꺼번에 지움 (전체 선택 가능)
   const sName = id => { const x = STRATS.find(s => s.id === id); return x ? x.short || x.name : id; };
   function bulkRender(note) {
@@ -690,6 +705,7 @@
   });
   $('#bt-search').addEventListener('click', e => {
     if (e.target.closest('[data-bt-close]')) { $('#bt-search').hidden = true; return; }
+    if (e.target.closest('[data-bt-min-reset]')) { bt.minN = MIN_N_DEF; bt.minRate = MIN_RATE_DEF; saveBt(); findSlTp(); return; }
     const a = e.target.closest('[data-bt-apply]');
     if (!a) return;
     const [sl, tp] = a.dataset.btApply.split(',').map(v => parseFloat(v) || null);
