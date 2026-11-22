@@ -1895,8 +1895,8 @@
       const j = await kakaoCall(action);
       if (action === 'start') { location.href = j.url; return; }
       if (action === 'report') {
-        $(KK.list).textContent = (j.messages || []).join('\n\n');
-        await kakaoBox(`<span class="pos">리서치 보고서를 카톡으로 보냈습니다 (${j.sent}통).</span>` + (j.errors && j.errors.length ? `<br><span class="muted">못 받은 자료: ${esc(j.errors.slice(0, 5).join(', '))}</span>` : ''));
+        $(KK.list).textContent = (j.summary ? j.summary + '\n\n— 보고서 전체 —\n\n' : '') + (j.messages || []).join('\n\n');
+        await kakaoBox(`<span class="pos">리서치 요약을 카톡으로 보냈습니다.</span>` + (j.url ? ` <a href="${esc(j.url)}" target="_blank" rel="noopener">보고서 열기</a>` : '') + (j.errors && j.errors.length ? `<br><span class="muted">못 받은 자료: ${esc(j.errors.slice(0, 5).join(', '))}</span>` : ''));
       } else if (action === 'check') {
         $(KK.list).textContent = (j.messages || []).join('\n\n');
         await kakaoBox(`<span class="pos">${j.sent ? '카톡으로 보냈습니다.' : '보낼 내용이 없습니다.'}</span>`);
