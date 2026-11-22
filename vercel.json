@@ -19,6 +19,10 @@
       "schedule": "30 22 * * 1-5"
     },
     {
+      "path": "/api/agent?action=cron&step=scan",
+      "schedule": "30 23 * * 1-5"
+    },
+    {
       "path": "/api/agent?action=cron&step=open",
       "schedule": "0 2 * * 1-5"
     },
