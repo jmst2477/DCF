@@ -21,29 +21,64 @@ function load() {
 export const libs = load;
 
 // js/app.js 의 simulate() 와 같은 계산 (다음 봉 시가 체결, 보유 중엔 매수 안 함, 손절·익절)
-export function simulate(d, strat, rule, TA) {
+// opt.fee: 사이트에서 정한 수수료(한쪽, 0.0025 = 0.25%). 주면 신호 기본값보다 먼저 씀 (성적 계산용)
+export function simulate(d, strat, rule, TA, opt = {}) {
   rule = rule || { sl: null, tp: null };
   const out = strat.run(d, TA);
-  const n = d.close.length, fee = out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
+  const n = d.close.length, fee = opt.fee >= 0 ? opt.fee : out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
   if (!out || !Array.isArray(out.buy) || !Array.isArray(out.exit)) throw new Error("buy·exit 배열을 돌려주지 않았습니다.");
   const sl = rule.sl / 100, tp = rule.tp / 100;
-  const marks = [];
+  const marks = [], trades = [];
   let pos = false, entry = null, pendBuy = false, pendExit = false;
-  const close = () => { pos = false; entry = null; };
+  const close = (i, price, reason) => {
+    pos = false;
+    trades.push({ from: entry, to: { i, price }, ret: (price * (1 - fee)) / (entry.price * (1 + fee)) - 1, reason });
+    entry = null;
+  };
   for (let i = 0; i < n; i++) {
     if (pendBuy && !pos) { pos = true; entry = { i, price: d.open[i] }; }
-    if (pendExit && pos) close();
+    if (pendExit && pos) close(i, d.open[i]);
     if (pos && sl > 0 && d.low[i] <= entry.price * (1 - sl)) {
       const px = Math.min(d.open[i], entry.price * (1 - sl));
-      close(); marks.push({ i, kind: "sell", reason: "손절", price: px });
+      close(i, px, "손절"); marks.push({ i, kind: "sell", reason: "손절", price: px });
     } else if (pos && tp > 0 && d.high[i] >= entry.price * (1 + tp)) {
       const px = Math.max(d.open[i], entry.price * (1 + tp));
-      close(); marks.push({ i, kind: "sell", reason: "익절", price: px });
+      close(i, px, "익절"); marks.push({ i, kind: "sell", reason: "익절", price: px });
     }
     pendBuy = !!out.buy[i]; pendExit = !!out.exit[i];
   }
-  return { out, marks, pos, entry, fee };
+  return { out, marks, trades, pos, entry, fee };
 }
+
+// 사이트 statsOf() 와 같은 셈: 최근 years 년 안에 사서 판 거래의 수·승률·누적 수익 (거래가 없으면 null)
+export function tradeStats(d, sim, years) {
+  if (!sim || !Array.isArray(sim.trades) || !d || !d.time || !d.time.length) return null;
+  const L = d.time.length - 1, cut = new Date(d.time[L]);
+  cut.setFullYear(cut.getFullYear() - years);
+  const c = cut.toISOString().slice(0, 10);
+  let s0 = d.time.findIndex(t => t >= c);
+  if (s0 < 0) s0 = 0;
+  const tr = sim.trades.filter(x => x.from.i >= s0);
+  if (!tr.length) return null;
+  const wins = tr.filter(x => x.ret > 0).length;
+  return { n: tr.length, wins, rate: wins / tr.length, total: tr.reduce((a, x) => a * (1 + x.ret), 1) - 1, from: d.time[s0] };
+}
+
+// 사이트 백테스트 수수료 설정 (dcf-backtest.fee, % 한쪽). 기본 0.25% (신한 해외 온라인)
+export function feeOf(data) {
+  const b = obj(data && data["dcf-backtest"]);
+  return typeof b.fee === "number" && b.fee >= 0 && b.fee <= 3 ? b.fee / 100 : 0.0025;
+}
+
+// 매일 훑어볼 큰 종목: 나스닥100 + S&P500 시가총액 상위 50 (겹치는 것 하나로, 2026년 하반기 기준. 구성은 가끔 바뀜)
+// BRK-B 는 한투 종목코드 꼴이 달라 뺌
+export const UNIVERSE = [...new Set((
+  "AAPL MSFT NVDA AMZN META AVGO GOOGL TSLA COST NFLX PLTR ASML AMD CSCO TMUS AZN LIN INTU PEP SHOP ISRG TXN BKNG QCOM AMGN ADBE PDD GILD AMAT HON " +
+  "ARM MU LRCX APP PANW CMCSA ADP KLAC MELI CRWD ADI VRTX SBUX CEG INTC DASH MSTR CDNS SNPS ORLY MDLZ CTAS ABNB MAR PYPL FTNT REGN MRVL CSX ADSK " +
+  "WDAY AXON ROP MNST AEP CHTR NXPI PCAR FAST TEAM PAYX IDXX DDOG ZS KDP ROST EA CPRT XEL BKR EXC VRSK TTWO FANG CCEP CTSH GEHC KHC ODFL TTD LULU " +
+  "DXCM CSGP WBD BIIB GFS ON CDW MCHP TRI " +
+  "JPM LLY V WMT ORCL MA XOM JNJ HD PG ABBV BAC UNH KO GE CVX WFC IBM CRM PM MS GS ABT AXP MCD DIS RTX T MRK CAT UBER NOW BX VZ"
+).split(" ").filter(Boolean))];
 
 // 마지막 봉에서 생긴 일: 새 매수 신호 / 청산 신호 / 손절·익절 실행
 export function lastEvents(d, sim) {
@@ -83,7 +118,7 @@ export function plan(data) {
     // 종목별 적용 신호 보기면 ★(손절·익절 적용) 있는 종목만 알림. ★ 없는 종목은 아직 매매 대상이 아님
     const s = perTicker ? byId(tstrat[t]) : cur;
     const r = s && obj(obj(sltp[t])[s.id]);
-    return { t, strat: s, rule: { sl: r && r.sl > 0 ? r.sl : null, tp: r && r.tp > 0 ? r.tp : null }, held: holdings.includes(t) };
+    return { t, strat: s, rule: { sl: r && r.sl > 0 ? r.sl : null, tp: r && r.tp > 0 ? r.tp : null }, held: holdings.includes(t), star: perTicker && !!s };
   }).filter(x => x.strat);
 }
 

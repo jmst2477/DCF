@@ -12,6 +12,16 @@ import crypto from "node:crypto";
 import { kisExchange } from "./_kis.js";
 import { newsBlocks } from "./_news.js";
 import { usClosed, kstDate } from "./_market.js";
+import { tradeStats, feeOf, UNIVERSE } from "./_signals.js";
+
+// 비밀번호 승인 없이 사는 조건 (★ 관심 종목만): 적용 신호 + 손절·익절로 지난 5년 승률 80% 이상, 거래 8번 이상, 최근 1년 누적 수익 +
+// 추천 종목·관심 목록 밖 종목은 조건이 맞아도 언제나 승인을 받는다
+export const AUTO = { rate: 0.8, n: 8 };
+export const autoOk = st => !!(st && st.rate >= AUTO.rate && st.n >= AUTO.n && st.y1 != null && st.y1 > 0);
+// 관심 목록 밖 큰 종목 찾기: 내 신호 중 지난 5년 승률 65%·5번 이상인 것만, 하루 많아야 5개 (승인 필요)
+export const SCAN = { rate: 0.65, n: 5, max: 5 };
+const pct = v => (v > 0 ? "+" : "") + (Math.abs(v) < 0.1 ? (v * 100).toFixed(1) : Math.round(v * 100)) + "%";
+const statTxt = s => (s ? `5년 승률 ${Math.round(s.rate * 100)}% (${s.n}번)${s.y1 != null ? ` · 최근 1년 ${pct(s.y1)}` : " · 최근 1년 거래 없음"}` : "");
 
 export const LIMITS = env => ({
   buyKrw: Number(env.AGENT_BUY_KRW) > 0 ? Number(env.AGENT_BUY_KRW) : 5000000,
@@ -23,6 +33,7 @@ export const LIMITS = env => ({
 const K = {
   pos: "agent:pos", orders: "agent:orders", appr: "agent:appr", seen: "agent:seen", plan: "agent:exitplan",
   month: "agent:month", paused: "agent:paused", log: "agent:log", closeDone: "agent:closeDone", openDone: "agent:openDone",
+  scanDone: "agent:scanDone", mstop: "agent:monthStop",
 };
 
 export const etDate = now => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
@@ -50,6 +61,7 @@ export function approvalDeadline(now) {
 
 export function makeAgent(deps) {
   const { store, kis, bars, plan, simulate, TA, send, env = {} } = deps;
+  const universe = deps.universe || UNIVERSE;
   const now = () => (deps.now ? deps.now() : new Date());
   const L = LIMITS(env);
   const get = async (k, d) => (await store.get(k)) ?? d;
@@ -188,7 +200,9 @@ export function makeAgent(deps) {
     if (!force && (await store.get(K.closeDone)) === today) return { skipped: "이미 함" };
     const { pos, bal, notes } = await reconcile();
     const month = await monthCheck(bal, pos);
+    await store.set(K.mstop, !!month.stop);
     const paused = !!(await store.get(K.paused));
+    const fee = feeOf(data || {});
     const items = plan(data || {});
     const W = { byT: Object.fromEntries(items.map(x => [x.t, x])) };
     const exits = [], buys = [], errors = [];
@@ -234,28 +248,46 @@ export function makeAgent(deps) {
     const newsOk = news && news.tickers && now().getTime() - Date.parse(news.at) < 30 * 3600e3;
     const newsOf = t => (newsOk ? news.tickers.find(x => x.t === t) : null);
     const busy = t => pos[t] || appr.some(a => a.t === t) || ordersOpen.some(o => o.t === t);
+    // 오늘 신호로 이미 승인·주문된 매수도 하루 한도에 센다
+    const taken = (await get(K.appr, [])).filter(a => a.sig === today && (a.status === "approved" || a.status === "sent")).length;
     for (const it of items) {
       try {
         const d = await bars(it.t);
         const i = d.close.length - 1;
         date = date && date > d.time[i] ? date : d.time[i];
         if (d.time[i] !== today) continue;
-        const sim = simulate(d, it.strat, it.rule, TA);
+        const sim = simulate(d, it.strat, it.rule, TA, { fee });
         if (!(sim.out.buy[i] && !sim.pos)) continue;
         const exch = kisExchange(d.exch);
         const why = paused ? "에이전트 멈춤" : month.stop ? `이번 달 손실 한도(-${L.monthLoss}%)` : busy(it.t) ? "이미 보유·주문 중"
-          : !exch ? `거래소 모름(${d.exch})` : newsBlocks(newsOf(it.t)) ? `뉴스 악재: ${newsOf(it.t).summary}` : buys.filter(b => !b.skip).length >= L.maxBuys ? `하루 ${L.maxBuys}건 한도` : null;
-        buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], exch, skip: why });
+          : !exch ? `거래소 모름(${d.exch})` : newsBlocks(newsOf(it.t)) ? `뉴스 악재: ${newsOf(it.t).summary}` : buys.filter(b => !b.skip).length + taken >= L.maxBuys ? `하루 ${L.maxBuys}건 한도` : null;
+        // 사이트와 같은 성적 (내 수수료 설정, 지난 5년·최근 1년)
+        const s5 = tradeStats(d, sim, 5), s1 = tradeStats(d, sim, 1);
+        const stat = s5 ? { rate: s5.rate, n: s5.n, y1: s1 ? s1.total : null } : null;
+        buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], exch, skip: why, stat, auto: !!it.star && autoOk(stat) });
       } catch (e) { errors.push(`${it.t}: ${e.message || e}`); }
     }
     const created = [];
+    let usdUsed = 0;
     for (const b of buys.filter(b => !b.skip)) {
       const limit = r2(b.close * (1 + L.slip / 100));
-      let est = null;
-      try { const bp = await kis.buyingPower(b.exch, b.t, limit); if (bp.rate > 0) est = Math.floor(L.buyKrw / bp.rate / limit); } catch { /* 승인 때 다시 계산 */ }
+      let est = null, bp = null;
+      try { bp = await kis.buyingPower(b.exch, b.t, limit); if (bp.rate > 0) est = Math.floor(L.buyKrw / bp.rate / limit); } catch { /* 승인 때 다시 계산 */ }
       const nw = newsOf(b.t);
       const a = { id: crypto.randomBytes(6).toString("hex"), t: b.t, sid: b.sid, rule: b.rule, name: b.name, news: nw ? `${nw.sentiment} · ${nw.summary}` : null, exch: b.exch, sig: today, close: b.close, limit, est,
-        status: "pending", created: now().toISOString(), deadline: approvalDeadline(now()) };
+        stat: b.stat, status: "pending", created: now().toISOString(), deadline: approvalDeadline(now()) };
+      // 자동 매수 조건이면 승인된 것으로 두고 11시대 단계에서 예약 주문 (그 전에 에이전트 화면에서 취소 가능)
+      if (b.auto) {
+        const qty = est || 0, cost = qty * limit;
+        const no = !(bp && bp.rate > 0) ? "환율·주문 가능 금액을 못 받음" : qty < 1 ? `1주 가격이 ${krw(L.buyKrw)}보다 비쌈` : cost > bp.usd - usdUsed ? `주문 가능 달러 부족 (필요 $${r2(cost)}, 가능 $${r2(Math.max(0, bp.usd - usdUsed))})` : null;
+        if (no) a.note = `자동 매수 조건은 맞지만 ${no} → 승인 대기`;
+        else {
+          usdUsed += cost;
+          Object.assign(a, { status: "approved", auto: true, qty, rate: bp.rate, approvedAt: now().toISOString() });
+          const closed = usClosed(kstDate(now()));
+          if (closed) a.note = `오늘 밤 미국 휴장(${closed}) — 다음 장 날 보냄`;
+        }
+      }
       created.push(a);
     }
     const all = (await get(K.appr, [])).map(a => (a.status === "pending" && a.deadline < now().toISOString() ? { ...a, status: "expired" } : a));
@@ -266,18 +298,82 @@ export function makeAgent(deps) {
 
     // 카톡
     const lines = notes.filter(n => n.startsWith("⚠") || n.includes("액면"));
-    created.forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}${a.news ? `\n  뉴스: ${a.news}` : ""}`));
+    created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 $${a.limit} × ${a.qty}주 → 오늘 11시대 예약 주문${a.news ? `\n  뉴스: ${a.news}` : ""}\n  원치 않으면 에이전트 화면에서 '취소'`));
+    created.filter(a => !a.auto).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 오늘 밤 장 시작에 자동 매도`));
     Object.keys(pos).forEach(t => { const n = newsOf(t); if (n && n.action === "보유 점검") lines.push(`⚠ ${t} 보유 중 뉴스 악재: ${n.summary} (자동 매도는 신호·손절대로)`); });
     if (month.stop) lines.push(`⚠ 이번 달 손익 $${r2(month.pnl)} — 새 매수 멈춤`);
     if (lines.length && send) {
       const head = `🤖 에이전트 ${today} 종가`;
-      const tail = created.length ? `\n승인 마감: 오늘 22시` : "";
+      const tail = created.some(a => a.status === "pending") ? `\n승인 마감: 오늘 22시` : "";
       await sendChunks(send, head, lines, tail, origin);
     }
-    await log(`종가 확인 ${today}: 승인 요청 ${created.length}, 청산 ${exits.filter(x => !x.price).length}, 익절 대기 ${exits.filter(x => x.price).length}` + (errors.length ? `, 오류 ${errors.length}` : ""));
+    await log(`종가 확인 ${today}: 승인 요청 ${created.filter(a => !a.auto).length}, 자동 매수 ${created.filter(a => a.auto).length}, 청산 ${exits.filter(x => !x.price).length}, 익절 대기 ${exits.filter(x => x.price).length}` + (errors.length ? `, 오류 ${errors.length}` : ""));
     return { date: today, created, buys, exits, errors, month, paused };
+  }
+
+  // ---------- 장 마감 뒤: 나스닥100·S&P 상위 50 중 관심 목록 밖 종목의 오늘 매수 신호 → 언제나 승인 요청 ----------
+  async function scanStep({ data, origin, force } = {}) {
+    const today = etDate(now());
+    if (!force && (await store.get(K.scanDone)) === today) return { skipped: "이미 함" };
+    if (await store.get(K.paused)) return { skipped: "에이전트 멈춤" };
+    if (await store.get(K.mstop)) return { skipped: `이번 달 손실 한도(-${L.monthLoss}%)` };
+    const strats = deps.strategies ? deps.strategies(data || {}) : [];
+    if (!strats.length) return { skipped: "쓸 신호 없음" };
+    const fee = feeOf(data || {});
+    const wl = new Set((Array.isArray(data && data["dcf-watchlist"]) ? data["dcf-watchlist"] : []).map(t => String(t).toUpperCase()));
+    const pos = await get(K.pos, {});
+    const apprAll = await get(K.appr, []);
+    const live = apprAll.filter(a => a.status === "pending" || a.status === "approved" || a.sig === today); // 오늘 이미 묻거나 거절한 종목은 다시 안 물음
+    const openBuys = (await get(K.orders, [])).filter(o => o.side === "buy" && (o.status === "sent" || o.status === "partial"));
+    const list = universe.filter(t => !wl.has(t) && !pos[t] && !live.some(a => a.t === t) && !openBuys.some(o => o.t === t));
+    const found = [], errors = [];
+    let next = 0, checked = 0, date = null;
+    const t0 = Date.now(), budget = deps.scanBudgetMs || 45000;
+    async function worker() {
+      while (next < list.length && Date.now() - t0 < budget) {
+        const t = list[next++];
+        try {
+          const d = await bars(t);
+          const i = d.close.length - 1;
+          checked++;
+          date = date && date > d.time[i] ? date : d.time[i];
+          if (d.time[i] !== today) continue;
+          let best = null;
+          for (const s of strats) {
+            let sim;
+            try { sim = simulate(d, s, { sl: null, tp: null }, TA, { fee }); } catch { continue; }
+            if (!(sim.out.buy[i] && !sim.pos)) continue;
+            const s5 = tradeStats(d, sim, 5);
+            if (!s5 || s5.rate < SCAN.rate || s5.n < SCAN.n) continue;
+            const s1 = tradeStats(d, sim, 1);
+            const stat = { rate: s5.rate, n: s5.n, total: s5.total, y1: s1 ? s1.total : null };
+            if (!best || stat.rate > best.stat.rate || (stat.rate === best.stat.rate && stat.total > best.stat.total)) best = { t, sid: s.id, name: s.name, stat, close: d.close[i], exch: kisExchange(d.exch) };
+          }
+          if (best && best.exch) found.push(best);
+        } catch (e) { errors.push(`${t}: ${e.message || e}`); }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(6, list.length) }, worker));
+    const cut = next < list.length ? list.length - next : 0; // 시간이 모자라 못 본 종목 수
+    found.sort((a, b) => b.stat.rate - a.stat.rate || b.stat.n - a.stat.n);
+    const created = [];
+    for (const b of found.slice(0, SCAN.max)) {
+      const limit = r2(b.close * (1 + L.slip / 100));
+      let est = null;
+      try { const bp = await kis.buyingPower(b.exch, b.t, limit); if (bp.rate > 0) est = Math.floor(L.buyKrw / bp.rate / limit); } catch { /* 승인 때 다시 계산 */ }
+      created.push({ id: crypto.randomBytes(6).toString("hex"), t: b.t, sid: b.sid, rule: { sl: null, tp: null }, name: b.name, news: null, exch: b.exch, sig: today, close: b.close, limit, est,
+        stat: b.stat, outside: true, status: "pending", created: now().toISOString(), deadline: approvalDeadline(now()) });
+    }
+    if (created.length) await store.set(K.appr, (await get(K.appr, [])).concat(created).slice(-100));
+    if (date === today && !cut) await store.set(K.scanDone, today);
+    if (created.length && send) {
+      const lines = created.map(a => `🔵 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""} · 승인해야 삼`);
+      await sendChunks(send, `🔎 관심 목록 밖 매수 신호 ${today} (나스닥100·S&P 상위 50)`, lines, `\n손절·익절 없이 신호 청산만 · 승인 마감: 오늘 22시`, origin);
+    }
+    await log(`큰 종목 찾기 ${today}: ${checked}/${list.length}종목 확인, 승인 요청 ${created.length}` + (found.length > created.length ? ` (조건 맞은 ${found.length}개 중 상위 ${created.length})` : "") + (cut ? `, 시간 부족으로 ${cut}종목 못 봄` : "") + (errors.length ? `, 오류 ${errors.length}` : ""));
+    return { date: today, checked, total: list.length, found, created, errors, cut };
   }
 
   // 주문 보내기 (예약). 성공하면 주문 기록
@@ -331,6 +427,7 @@ export function makeAgent(deps) {
     const appr = await get(K.appr, []);
     const a = appr.find(x => x.id === id);
     if (!a) throw new Error("승인 요청을 찾을 수 없습니다.");
+    if (reject && a.status === "approved") { a.status = "rejected"; a.note = "주문 전에 취소함"; await store.set(K.appr, appr); await log(`매수 취소 ${a.t}${a.auto ? " (자동 매수)" : ""}`); return { status: "rejected" }; }
     if (a.status !== "pending") throw new Error(`이미 처리된 요청입니다 (${a.status}).`);
     const t = now();
     if (a.deadline < t.toISOString()) { a.status = "expired"; await store.set(K.appr, appr); throw new Error("승인 시간(22시)이 지났습니다."); }
@@ -393,7 +490,7 @@ export function makeAgent(deps) {
   }
   async function setPaused(v) { await store.set(K.paused, !!v); await log(v ? "에이전트 멈춤" : "에이전트 다시 켬"); }
 
-  return { closeStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log };
+  return { closeStep, scanStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log };
 }
 
 // 카톡 한 통 200자 제한

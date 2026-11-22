@@ -7,13 +7,14 @@
 // 계산·규칙은 api/_agent.js, 한투 호출은 api/_kis.js
 //   GET                          → 에이전트 화면 (HTML)
 //   GET ?action=cron&step=close  → 장 마감 뒤 (Vercel Cron, 한국 07시대)
+//   GET ?action=cron&step=scan   → 나스닥100·S&P 상위 50 중 관심 목록 밖 매수 신호 → 승인 요청 (Vercel Cron, 한국 08시대)
 //   GET ?action=cron&step=open   → 예약 주문 (Vercel Cron, 한국 11시대)
 //   POST { action, password, id? }  action = status | approve | reject | pause | resume | close(지금 종가 확인)
 
 import crypto from "node:crypto";
 import { makeAgent } from "./_agent.js";
 import { makeKis, kisConfig } from "./_kis.js";
-import { plan, simulate, libs } from "./_signals.js";
+import { plan, simulate, libs, strategies } from "./_signals.js";
 import { dailyBars } from "./prices.js";
 import { sendMemo } from "./kakao.js";
 
@@ -46,9 +47,9 @@ function agent(req) {
   const W = libs();
   const kis = makeKis({ store });
   return makeAgent({
-    store, env: process.env, TA: W.TA, plan, simulate, kis,
-    // 야후가 안 되면 한투 일봉(최근 300개)으로
-    bars: async t => { try { return await dailyBars(t, "2y"); } catch (e) { try { return await kis.daily(t, null, 3); } catch { throw e; } } },
+    store, env: process.env, TA: W.TA, plan, simulate, strategies, kis,
+    // 성적(지난 5년)을 사이트와 같게 내려고 5년치. 야후가 안 되면 한투 일봉(최근 300개)으로
+    bars: async t => { try { return await dailyBars(t, "5y"); } catch (e) { try { return await kis.daily(t, null, 3); } catch { throw e; } } },
     send: async (text, link) => { try { await sendMemo(text, link); } catch { /* 카톡이 끊겨 있어도 주문 흐름은 계속 */ } },
   });
 }
@@ -79,11 +80,11 @@ export default async function handler(req, res) {
       if (!ready) return res.status(200).json({ skipped: "not configured" });
       const A = agent(req);
       try {
-        const r = q.step === "open" ? await A.openStep({ origin: originOf(req) }) : await A.closeStep({ data: await syncData(), origin: originOf(req) });
+        const r = q.step === "open" ? await A.openStep({ origin: originOf(req) }) : q.step === "scan" ? await A.scanStep({ data: await syncData(), origin: originOf(req) }) : await A.closeStep({ data: await syncData(), origin: originOf(req) });
         return res.status(200).json({ ok: true, created: r.created && r.created.length, done: r.done, errors: r.errors, skipped: r.skipped });
       } catch (e) {
         // 한투 접속 실패 등: 기록 남기고 카톡으로 알림
-        const m = `⚠ 에이전트 ${q.step === "open" ? "예약 주문" : "종가 확인"} 실패: ${String((e && e.message) || e)}`;
+        const m = `⚠ 에이전트 ${q.step === "open" ? "예약 주문" : q.step === "scan" ? "큰 종목 찾기" : "종가 확인"} 실패: ${String((e && e.message) || e)}`;
         await A.note(m).catch(() => {});
         await sendMemo(m, originOf(req) + "/api/agent").catch(() => {});
         throw e;
@@ -102,6 +103,7 @@ export default async function handler(req, res) {
     if (body.action === "approve" || body.action === "reject") return res.status(200).json(await A.approve(String(body.id || ""), { reject: body.action === "reject" }));
     if (body.action === "pause" || body.action === "resume") { await A.setPaused(body.action === "pause"); return res.status(200).json(await A.status()); }
     if (body.action === "close") return res.status(200).json(await A.closeStep({ data: await syncData(), origin: originOf(req), force: true }));
+    if (body.action === "scan") return res.status(200).json(await A.scanStep({ data: await syncData(), origin: originOf(req), force: true }));
     if (body.action === "status") return res.status(200).json(await A.status());
     if (body.action === "broker") return res.status(200).json(await A.broker());
     if (body.action === "cancel") return res.status(200).json(await A.cancel(String(body.no || "")));
@@ -128,6 +130,7 @@ button.ghost{background:var(--ln);color:var(--tx)}button.red{background:var(--rd
 .row{display:flex;gap:8px;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--ln)}
 .row:first-of-type{border-top:0}.btns{display:flex;gap:6px;flex-shrink:0}
 .log{font-size:13px;color:var(--mu);margin:2px 0}
+.tag{font-size:12px;padding:1px 6px;border-radius:6px;background:var(--ln);color:var(--tx)}
 </style>
 <main>
 <h1>🤖 주식 에이전트</h1>
@@ -146,11 +149,11 @@ ${!ready ? `<div class="card"><h2>아직 준비 중</h2><p class="mu">Vercel 환
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let PW='';
 async function call(action,extra){const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,password:PW,...extra})});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||r.status);return j}
-const ST={pending:'승인 대기',approved:'승인됨 · 10시 이후 주문',sent:'주문 보냄',rejected:'거절',expired:'시간 지남',failed:'주문 실패',canceled:'취소함'};
+const ST={pending:'승인 대기',approved:'승인됨 · 11시대 주문',sent:'주문 보냄',rejected:'거절',expired:'시간 지남',failed:'주문 실패',canceled:'취소함'};
 const t2=s=>new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 function render(s){
   const ap=s.appr||[];
-  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> <span class="mu">'+esc(a.name)+'</span><div class="mu">'+esc(a.sig)+' 종가 $'+a.close.toFixed(2)+' → 지정가 $'+a.limit.toFixed(2)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'">승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
+  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> '+(a.auto?'<span class="tag">🤖 자동</span> ':'')+(a.outside?'<span class="tag">관심 목록 밖</span> ':'')+'<span class="mu">'+esc(a.name)+'</span>'+(a.stat?'<div class="mu">5년 승률 '+Math.round(a.stat.rate*100)+'% ('+a.stat.n+'번)'+(a.stat.y1!=null?' · 최근 1년 '+(a.stat.y1>0?'+':'')+Math.round(a.stat.y1*100)+'%':'')+'</div>':'')+'<div class="mu">'+esc(a.sig)+' 종가 $'+a.close.toFixed(2)+' → 지정가 $'+a.limit.toFixed(2)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'">승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':a.status==='approved'?'<div class="btns"><button class="ghost" data-no="'+a.id+'" data-ask="1">취소</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
   const ps=Object.entries(s.pos||{});
   $('#pos').innerHTML=ps.length?ps.map(([t,p])=>'<div class="row"><div><b>'+esc(t)+'</b> '+p.qty+'주 · 평균 $'+p.avg.toFixed(2)+'<div class="mu">'+esc(p.since)+'부터'+(p.rule&&(p.rule.sl||p.rule.tp)?' · 손절 '+(p.rule.sl||'-')+'% 익절 '+(p.rule.tp||'-')+'%':'')+'</div></div></div>').join(''):'<p class="mu">없습니다. (직접 산 주식은 건드리지 않습니다)</p>';
   const pl=s.plan&&s.plan.exits||[];
@@ -174,7 +177,7 @@ document.addEventListener('click',async e=>{
   const msg=$('#amsg');
   try{
     if(b.dataset.ok){if(!confirm('실제 돈으로 매수 주문을 넣습니다. 승인할까요?'))return;b.disabled=true;const r=await call('approve',{id:b.dataset.ok});alert(r.qty+'주 · $'+r.cost+' (약 '+Math.round(r.krw/1e4)+'만원) '+(r.status==='sent'?'예약 주문을 보냈습니다. 오늘 밤 장 시작에 나갑니다.':r.note?'승인했습니다. '+r.note:'승인했습니다. 오전 10시 이후에 예약 주문을 보냅니다.'))}
-    else if(b.dataset.no){b.disabled=true;await call('reject',{id:b.dataset.no})}
+    else if(b.dataset.no){if(b.dataset.ask&&!confirm('주문 전에 이 매수를 취소할까요?'))return;b.disabled=true;await call('reject',{id:b.dataset.no})}
     else if(b.dataset.cancel){if(!confirm('이 예약 주문을 취소할까요?'))return;b.disabled=true;await call('cancel',{no:b.dataset.cancel})}
     else if(b.id==='pause'){render(await call($('#pause').textContent.includes('멈추')?'pause':'resume'));return}
     else if(b.id==='close'){b.disabled=true;msg.textContent='확인 중…';const r=await call('close');msg.textContent=r.skipped?'오늘은 이미 확인했습니다.':'승인 요청 '+(r.created||[]).length+'건 · 청산 '+(r.exits||[]).filter(x=>!x.price).length+'건'+((r.errors||[]).length?' · 오류: '+r.errors.join(', '):'');b.disabled=false}
