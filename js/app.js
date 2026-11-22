@@ -694,6 +694,81 @@
     btChanged();
     bulkRender(`${ts.length}종목을 풀었습니다.`);
   });
+  // "⚡ 최적 자동 적용": 고른 종목마다 보이는 모든 신호 × 손절·익절 64가지를 지금 기간으로 계산해
+  // 최소 기준(거래 수·승률)을 넘는 조합 중 누적 수익 1위를 그 종목의 ★ + 손절·익절로 적용. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 고름.
+  // 기준을 넘는 조합이 없는 종목은 건드리지 않음.
+  let optRun = 0;
+  function optRender(result) {
+    const box = $('#bt-opt');
+    const head = `<div class="bt-search-head"><b>⚡ 최적 조건 자동 적용</b> <span class="muted small">${esc(btName())} · 신호 ${STRATS.length}개 × 손절·익절 ${SL_GRID.length * TP_GRID.length}가지</span><button type="button" class="ghost mini" data-opt-close>닫기 ✕</button></div>`;
+    if (!watch.length) { box.innerHTML = head + '<p class="muted small">관심 종목이 없습니다.</p>'; return; }
+    box.innerHTML = head + minBox().replace(/data-bt-min/g, 'data-opt-min') +
+      `<label class="bulk-all"><input type="checkbox" data-opt-all> 전체 선택</label>
+      <ul class="bulk-list">${watch.map(t => `<li><label><input type="checkbox" data-opt-t="${esc(t)}"><b>${esc(t)}</b><span class="muted">${tstrat[t] ? '★ ' + esc(sName(tstrat[t])) + (sltp[t] && sltp[t][tstrat[t]] ? ' ' + [sltp[t][tstrat[t]].sl ? '-' + sltp[t][tstrat[t]].sl + '%' : '', sltp[t][tstrat[t]].tp ? '+' + sltp[t][tstrat[t]].tp + '%' : ''].filter(Boolean).join('/') : '') : '적용 없음'}</span></label></li>`).join('')}</ul>
+      <div class="bulk-actions"><button type="button" class="mini" data-opt-go disabled>찾아서 적용</button><span class="muted small" data-opt-n>0종목 선택</span></div>` + (result || '');
+  }
+  function optSync() {
+    const box = $('#bt-opt'), all = [...box.querySelectorAll('[data-opt-t]')], on = all.filter(c => c.checked);
+    const a = box.querySelector('[data-opt-all]');
+    if (a) { a.checked = all.length > 0 && on.length === all.length; a.indeterminate = on.length > 0 && on.length < all.length; }
+    const go = box.querySelector('[data-opt-go]'); if (go) go.disabled = !on.length;
+    const n = box.querySelector('[data-opt-n]'); if (n) n.textContent = `${on.length}종목 선택`;
+  }
+  // 한 종목의 최적 조합 (없으면 null)
+  async function bestFor(t) {
+    const r = await getSig(t), good = x => x.st.n >= bt.minN && x.st.rate >= bt.minRate / 100 - 1e-9, rows = [];
+    for (const s of STRATS) {
+      for (const sl of SL_GRID) for (const tp of TP_GRID) {
+        let sim; try { sim = simulate(r.d, s, { sl, tp }); } catch (e) { continue; }
+        const st = statsOf(sim);
+        if (st && good({ st })) rows.push({ s, sl, tp, st, sim });
+      }
+      await new Promise(res => setTimeout(res, 0)); // 화면이 멈추지 않게
+    }
+    if (!rows.length) return null;
+    const recentOk = x => { if (bt.years <= 1) return true; const q = statsOf(x.sim, 1); return !!q && q.total > 0; };
+    const pool = rows.some(recentOk) ? rows.filter(recentOk) : rows;
+    // 누적 수익 1위, 같으면 낙폭 작은 것, 그래도 같으면 손절·익절이 단순한 것
+    pool.sort((a, b) => b.st.total - a.st.total || b.st.mdd - a.st.mdd || (!!a.sl + !!a.tp) - (!!b.sl + !!b.tp));
+    const best = pool[0], q1 = statsOf(best.sim, 1);
+    return { ...best, y1: q1 ? q1.total : null, recentChecked: pool !== rows || bt.years <= 1 };
+  }
+  $('#bt-opt-btn').addEventListener('click', () => { const b = $('#bt-opt'); if (!b.hidden) { b.hidden = true; return; } b.hidden = false; optRender(); });
+  $('#bt-opt').addEventListener('change', e => {
+    const m = e.target.closest('[data-opt-min]');
+    if (m) { const v = Number(m.value); if (m.dataset.optMin === 'n') { if (okN(v)) bt.minN = v; } else if (okR(v)) bt.minRate = v; saveBt(); const keep = [...$('#bt-opt').querySelectorAll('[data-opt-t]')].filter(c => c.checked).map(c => c.dataset.optT); optRender(); keep.forEach(t => { const c = $('#bt-opt').querySelector(`[data-opt-t="${CSS.escape(t)}"]`); if (c) c.checked = true; }); optSync(); return; }
+    if (e.target.matches('[data-opt-all]')) $('#bt-opt').querySelectorAll('[data-opt-t]').forEach(c => { c.checked = e.target.checked; });
+    optSync();
+  });
+  $('#bt-opt').addEventListener('click', async e => {
+    if (e.target.closest('[data-opt-close]')) { $('#bt-opt').hidden = true; optRun++; return; }
+    if (e.target.closest('[data-bt-min-reset]')) { bt.minN = MIN_N_DEF; bt.minRate = MIN_RATE_DEF; saveBt(); optRender(); return; }
+    const go = e.target.closest('[data-opt-go]');
+    if (!go) return;
+    const ts = [...$('#bt-opt').querySelectorAll('[data-opt-t]')].filter(c => c.checked).map(c => c.dataset.optT);
+    if (!ts.length || !confirm(`${ts.length}종목의 ★ 신호와 손절·익절을 가장 좋은 조합으로 바꿀까요?\n(최소 기준: 거래 ${bt.minN}번·승률 ${bt.minRate}% 이상, 기간 ${btName()})`)) return;
+    const run = ++optRun, out = [];
+    go.disabled = true;
+    const status = $('#bt-opt').querySelector('[data-opt-n]');
+    for (let k = 0; k < ts.length; k++) {
+      const t = ts[k];
+      if (status) status.textContent = `계산 중 ${k + 1}/${ts.length} · ${t}`;
+      let b = null, err = null;
+      try { b = await bestFor(t); } catch (x) { err = x; }
+      if (run !== optRun) return; // 닫힘
+      const before = tstrat[t] ? sName(tstrat[t]) : '없음';
+      if (b) { setSltp(t, b.s.id, { sl: b.sl, tp: b.tp }); setTickerStrat(t, b.s.id); }
+      out.push({ t, b, err, before });
+    }
+    btChanged();
+    const pct = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
+    const done = out.filter(x => x.b).length;
+    optRender(`<p class="small pos">${done}종목에 적용했습니다${out.length > done ? `, ${out.length - done}종목은 기준을 넘는 조합이 없어 그대로 두었습니다` : ''}.</p>
+      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th>최근 1년</th><th>전</th></tr></thead><tbody>${out.map(x => x.b
+        ? `<tr><td><b>${esc(x.t)}</b></td><td>${esc(x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
+        : `<tr><td><b>${esc(x.t)}</b></td><td colspan="7" class="muted small">${x.err ? '주가를 불러오지 못함' : '기준을 넘는 조합 없음'} · 그대로 둠</td><td class="muted small">${esc(x.before)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="muted small">지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 골랐습니다. 마음에 안 들면 그 종목에서 '손절·익절 풀기'나 '손절·익절 찾기'로 바꾸세요.</p>`);
+  });
   // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
   $('#bt-reset').addEventListener('click', () => {
     const t = modalTicker, cs = STRATS.find(x => x.id === stratSel);
