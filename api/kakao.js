@@ -15,6 +15,8 @@ import { checkAll, messages, strategies, plan, libs } from "./_signals.js";
 import { makeReport, reportMessages, discoverCandidates, discoverMessage } from "./_report.js";
 import { makeKis, kisConfig } from "./_kis.js";
 import { splitMemo } from "./_memo.js";
+import { reportSummary, reportPage } from "./_reportpage.js";
+import { newsBlocks } from "./_news.js";
 import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
 import { dailyBars, summary } from "./prices.js";
 
@@ -29,7 +31,7 @@ const KEY = process.env.KAKAO_REST_API_KEY || "";
 const SECRET = process.env.KAKAO_CLIENT_SECRET || "";
 const K = {
   pw: "dcf:sync2:pw", data: "dcf:sync2:data", fails: "dcf:sync2:fails",
-  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", discover: "dcf:discover", state: "dcf:kakao:state:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
+  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", discover: "dcf:discover", state: "dcf:kakao:state:", view: "dcf:rv:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
 };
 const MAX_FAILS = 20;
 
@@ -106,12 +108,13 @@ async function accessToken() {
   return t;
 }
 // 200자가 넘으면 줄 단위로 나눠 여러 통으로 보낸다
-export async function sendMemo(text, link) {
-  for (const part of splitMemo(text)) await sendMemo1(part, link);
+export async function sendMemo(text, link, button) {
+  for (const part of splitMemo(text)) await sendMemo1(part, link, button);
 }
-async function sendMemo1(text, link) {
+async function sendMemo1(text, link, button) {
   const t = await accessToken();
-  const tpl = { object_type: "text", text, link: { web_url: link || t.origin, mobile_web_url: link || t.origin }, button_title: "사이트 열기" };
+  if (typeof link === "function") link = link(t.origin);
+  const tpl = { object_type: "text", text, link: { web_url: link || t.origin, mobile_web_url: link || t.origin }, button_title: button || "사이트 열기" };
   const r = await fetch("https://kapi.kakao.com/v2/api/talk/memo/default/send", {
     method: "POST",
     headers: { Authorization: `Bearer ${t.access}`, "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
@@ -155,10 +158,17 @@ async function runReport(manual = false) {
   // 새 후보는 찾은 날(월요일) 보고서와 직접 미리 보내기 때만 넣는다 (매일 같은 목록 반복 안 함)
   const dscMsg = dsc && Date.now() - Date.parse(dsc.at) < (manual ? 8 * 864e5 : 30 * 3600e3) ? discoverMessage(dsc) : [];
   const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : [], dscMsg);
-  for (const m of msgs) await sendMemo(m);
+  // 전체는 웹페이지 한 장으로 저장하고, 카톡은 요약 한 통 + "보고서 열기" 버튼
+  const id = crypto.randomBytes(16).toString("hex");
+  await redis("SET", K.view + id, JSON.stringify({ at: new Date().toISOString(), date: r.date, sections: msgs, errors: r.errors.slice(0, 10) }), "EX", 45 * 86400);
+  const newsWarn = fresh && news.tickers ? news.tickers.filter(x => newsBlocks(x) || x.action === "보유 점검").length : 0;
+  const picks = dscMsg.length && dsc.picks ? dsc.picks.length : 0;
+  const summaryText = reportSummary(r, { newsWarn, picks });
+  const path = `/api/kakao?view=${id}`;
+  await sendMemo(summaryText, origin => origin + path, "보고서 열기");
   await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10),
     regime: r.spy ? r.spy.kind : null, strong: r.strong.map(s => s.ko).join(", ") }));
-  return { date: r.date, messages: msgs, sent: msgs.length, errors: r.errors };
+  return { date: r.date, messages: msgs, summary: summaryText, url: path, sent: 1, errors: r.errors };
 }
 
 // 새 후보 종목 (주 1회, 월요일 Cron · 리서치 미리 보내기 때 일주일 넘었으면)
@@ -262,6 +272,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ picks: r.picks ? r.picks.length : 0, scanned: r.scanned || 0, skipped: r.skipped || null });
     }
     // 카카오 로그인 후 돌아오는 곳
+    // 리서치 보고서 페이지 (카톡 "보고서 열기")
+    if (req.method === "GET" && q.view) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Robots-Tag", "noindex");
+      const v = /^[a-f0-9]{32}$/.test(String(q.view)) && URL_ && TOKEN ? await jget(K.view + q.view) : null;
+      if (!v) return res.status(404).send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:sans-serif;padding:24px">보고서가 없거나 45일이 지나 지워졌습니다. <a href="/">사이트로</a></body>`);
+      return res.status(200).send(reportPage(v));
+    }
     if (req.method === "GET" && (q.code || q.error)) {
       if (!ready) return page(res, false, "서버 설정이 아직 끝나지 않았습니다.");
       if (q.error) return page(res, false, "카카오 로그인이 취소됐거나 동의하지 않았습니다. (" + String(q.error_description || q.error).replace(/[<>&]/g, "") + ")");
