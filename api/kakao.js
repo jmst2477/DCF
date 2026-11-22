@@ -159,12 +159,14 @@ async function runReport(manual = false) {
   const dscMsg = dsc && Date.now() - Date.parse(dsc.at) < (manual ? 8 * 864e5 : 30 * 3600e3) ? discoverMessage(dsc) : [];
   const msgs = reportMessages(r).concat(fresh ? newsMessages(news) : [], dscMsg);
   // 전체는 웹페이지 한 장으로 저장하고, 카톡은 요약 한 통 + "보고서 열기" 버튼
-  const id = crypto.randomBytes(16).toString("hex");
+  const id = crypto.randomBytes(8).toString("hex"); // 짧은 주소 (16자, 추측 불가)
   await redis("SET", K.view + id, JSON.stringify({ at: new Date().toISOString(), date: r.date, sections: msgs, errors: r.errors.slice(0, 10) }), "EX", 45 * 86400);
   const newsWarn = fresh && news.tickers ? news.tickers.filter(x => newsBlocks(x) || x.action === "보유 점검").length : 0;
   const picks = dscMsg.length && dsc.picks ? dsc.picks.length : 0;
-  const summaryText = reportSummary(r, { newsWarn, picks });
-  const path = `/api/kakao?view=${id}`;
+  // 카카오가 버튼을 숨겨도 열 수 있게 요약 안에 보고서 주소를 직접 넣는다 (카톡이 주소를 링크로 바꿔 줌)
+  const path = `/r/${id}`;
+  const origin = (await accessToken()).origin;
+  const summaryText = reportSummary(r, { newsWarn, picks, url: origin ? origin + path : null });
   await sendMemo(summaryText, origin => origin + path, "보고서 열기");
   await redis("SET", K.report, JSON.stringify({ at: new Date().toISOString(), date: r.date, sent: msgs.length, errors: r.errors.slice(0, 10),
     regime: r.spy ? r.spy.kind : null, strong: r.strong.map(s => s.ko).join(", ") }));
@@ -276,7 +278,7 @@ export default async function handler(req, res) {
     if (req.method === "GET" && q.view) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("X-Robots-Tag", "noindex");
-      const v = /^[a-f0-9]{32}$/.test(String(q.view)) && URL_ && TOKEN ? await jget(K.view + q.view) : null;
+      const v = /^([a-f0-9]{16}|[a-f0-9]{32})$/.test(String(q.view)) && URL_ && TOKEN ? await jget(K.view + q.view) : null;
       if (!v) return res.status(404).send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:sans-serif;padding:24px">보고서가 없거나 45일이 지나 지워졌습니다. <a href="/">사이트로</a></body>`);
       return res.status(200).send(reportPage(v));
     }

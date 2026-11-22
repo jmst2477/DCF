@@ -38,5 +38,11 @@
       "path": "/api/kakao?action=discover",
       "schedule": "0 20 * * 1"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/r/:id",
+      "destination": "/api/kakao?view=:id"
+    }
   ]
 }

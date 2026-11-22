@@ -3,7 +3,7 @@
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // 카톡 요약 한 통 (200자 안)
-export function reportSummary(r, { newsWarn = 0, picks = 0 } = {}) {
+export function reportSummary(r, { newsWarn = 0, picks = 0, url = null } = {}) {
   const o = r.overall;
   const lines = [`📊 리서치 ${r.date || ""}`];
   if (o) lines.push(`🧭 종합평가: ${o.level} (${o.score > 0 ? "+" : ""}${o.score})`, o.action);
@@ -14,7 +14,7 @@ export function reportSummary(r, { newsWarn = 0, picks = 0 } = {}) {
   if (newsWarn) extra.push(`뉴스 주의 ${newsWarn}종목`);
   if (picks) extra.push(`새 후보 ${picks}개`);
   if (extra.length) lines.push(extra.join(" · "));
-  lines.push("전체 내용은 아래 '보고서 열기'");
+  lines.push(url ? `📄 전체 보고서: ${url}` : "전체 내용은 아래 '보고서 열기'");
   // 200자를 넘으면 가운데 줄부터 뺀다 (첫 줄·종합평가·마지막 안내는 남김)
   while (lines.join("\n").length > 200 && lines.length > 3) lines.splice(lines.length - 2, 1);
   return lines.join("\n").slice(0, 200);
