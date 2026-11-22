@@ -1,0 +1,29 @@
+# 백테스트용 일봉 받기 (클라우드 작업 환경은 시세 사이트에 못 붙어서 GitHub 서버가 대신 받아 이 브랜치에 저장)
+# bt-data 브랜치의 tickers.txt 를 바꿔 올리면 돈다. main 과 사이트에는 영향 없음. (2026-11-22 장형일 허락)
+name: bt-data
+on:
+  push:
+    branches: [bt-data]
+    paths: [tickers.txt]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch daily bars (Yahoo, 10y)
+        run: |
+          mkdir -p data
+          for t in $(cat tickers.txt); do
+            curl -s -m 30 -A "Mozilla/5.0" "https://query1.finance.yahoo.com/v8/finance/chart/${t}?range=10y&interval=1d" -o "data/${t}.json" || echo "fail $t"
+            sleep 1
+          done
+          ls -la data
+      - name: commit
+        run: |
+          git config user.name "bt-data"
+          git config user.email "bt-data@users.noreply.github.com"
+          git add data
+          git commit -m "일봉 저장 [skip ci]" || exit 0
+          git push
