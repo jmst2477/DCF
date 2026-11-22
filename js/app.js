@@ -1673,7 +1673,9 @@
       const rt = list.querySelector(`.wl-rate[data-r="${CSS.escape(t)}"]`);
       if (rt && sim0 && !sim0.error) {
         const ru = sltpOf(t, s0.id), other = s0.id !== stratSel;
-        rt.innerHTML = esc((other ? (s0.short || s0.name) + ' · ' : '') + rateTxt(statsOf(sim0))) + (ru.sl || ru.tp || tstrat[t] === s0.id ? ' <span class="sltp-tag">손익절 설정</span>' : '');
+        // 신호 · 승률 · 누적 수익률(지금 기간, 수수료 포함) · 손익절 설정
+        const st0 = statsOf(sim0);
+        rt.innerHTML = esc((other ? (s0.short || s0.name) + ' · ' : '') + rateTxt(st0)) + (st0 ? ` · <span class="chg ${st0.total >= 0 ? 'up' : 'down'}" title="${esc(btName())} 누적 수익률 (수수료 포함)">${st0.total >= 0 ? '+' : ''}${(st0.total * 100).toFixed(0)}%</span>` : '') + (ru.sl || ru.tp || tstrat[t] === s0.id ? ' <span class="sltp-tag">손익절 설정</span>' : '');
       }
       const li = el.closest('li');
       if (li) li.dataset.sig = st.cls;
