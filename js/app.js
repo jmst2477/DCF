@@ -1467,8 +1467,15 @@
       .map(([v, label, n]) => `<button type="button" class="chip ${v === themePick ? 'on' : ''}" data-theme-pick="${esc(v)}">${esc(label)} <span class="muted">${n}</span></button>`).join('');
   }
 
+  // 맨 위 탭: chart = 차트·신호(이 화면), dcf = DCF 적정가
+  const TAB_KEY = 'dcf-tab';
+  function markTab(tab) {
+    $$('#tabs [data-tab]').forEach(b => { const on = b.dataset.tab === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+    lsSet(TAB_KEY, tab);
+  }
   function openModal(t) {
     t = (t || state.ticker || watch[0] || '').trim().toUpperCase();
+    markTab('chart');
     $('#chart-modal').hidden = false;
     document.body.classList.add('modal-open');
     renderPickers();
@@ -1478,6 +1485,9 @@
     else $('#modal-sig').innerHTML = '<p class="muted" style="padding:24px">왼쪽에 관심종목을 추가하거나, 위 검색창에서 종목을 계산하세요.</p>';
   }
   function closeModal() {
+    markTab('dcf');
+    // 차트에서 보던 종목을 DCF 칸에 미리 넣어 둠 (비어 있을 때만)
+    if (modalTicker && !$('#lookup-ticker').value) $('#lookup-ticker').value = modalTicker;
     $('#chart-modal').hidden = true;
     document.body.classList.remove('modal-open');
     if (modalChart) { modalChart.remove(); modalChart = null; }
@@ -1601,8 +1611,13 @@
 
   $('#btn-chart').addEventListener('click', () => openModal());
     $('#modal-close').addEventListener('click', closeModal);
-  $('#chart-modal').addEventListener('click', e => { if (e.target.id === 'chart-modal') closeModal(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#chart-modal').hidden) closeModal(); });
+  $('#tabs').addEventListener('click', e => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    if (b.dataset.tab === 'chart') { if ($('#chart-modal').hidden) openModal(); }
+    else if (!$('#chart-modal').hidden) closeModal();
+    window.scrollTo(0, 0);
+  });
   $('#wl-form').addEventListener('submit', e => {
     e.preventDefault();
     // 리포트 종목을 한 번에: "GEV BE CEG" 처럼 띄어 쓰거나 쉼표로 여러 개
@@ -2146,5 +2161,8 @@
   renderAll();
   if (state.info && state.info.history) renderHistory(state.info);
   const qs = new URLSearchParams(location.search), qt = qs.get('t');
-  if (qt) lookup(qt);
+  if (qt) { markTab('dcf'); lookup(qt); }
+  // 첫 화면은 차트 (주소에 ?t= 가 있거나 마지막에 DCF 탭을 봤으면 DCF)
+  else if (!/[?&]kakao=ok/.test(location.search) && lsGet(TAB_KEY, 'chart') !== 'dcf') openModal();
+  else if ($('#chart-modal').hidden) markTab('dcf');
 })();

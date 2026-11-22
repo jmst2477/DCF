@@ -3,15 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DCF 계산기</title>
+<title>주식 신호·DCF</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+<!-- 맨 위 탭: 차트·신호가 첫 화면, DCF 적정가는 옆 탭 (마지막에 본 탭을 기억) -->
+<nav id="tabs" class="tabs" role="tablist">
+  <button type="button" role="tab" data-tab="chart">📈 차트·신호</button>
+  <button type="button" role="tab" data-tab="dcf">🧮 DCF 적정가</button>
+</nav>
 <header class="top">
   <div class="title-row">
     <h1>DCF 계산기</h1>
-    <button type="button" id="btn-chart" class="ghost chart-btn">📈 차트</button>
+    <button type="button" id="btn-chart" class="ghost chart-btn" hidden>📈 차트</button>
   </div>
   <p class="sub">티커를 넣고 <b>계산</b>을 누르면 지금·내년·내후년 적정가가 나옵니다.</p>
   <form id="lookup" class="lookup">
@@ -158,7 +163,7 @@
     <section class="modal-main">
       <div class="modal-head">
         <div><b id="modal-title" class="modal-title"></b> <span id="modal-sub" class="modal-sub"></span></div>
-        <button type="button" id="modal-close" class="ghost mini">닫기 ✕</button>
+        <button type="button" id="modal-close" class="ghost mini" hidden>닫기 ✕</button>
       </div>
       <div class="modal-pick">
         <div class="pick-row"><span class="pick-label">신호</span><div class="strat-pick"></div></div>
