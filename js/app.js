@@ -425,19 +425,25 @@
   }
   const rateTxt = st => (st ? `승률 ${Math.round(st.rate * 100)}%` : '거래 없음');
 
-  // 종목별 일봉 (한 번 받은 종목은 다시 받지 않음). 신호·지표 결과도 종목별로 한 번만 계산
+  // 종목별 일봉. 신호·지표 결과는 받은 데이터마다 한 번만 계산.
+  // 화면이 열려 있으면 1분마다 새로 받음 (liveTick). 분 단위 꼬리표로 서버 캐시(5분)를 건너뜀
   const sigCache = {};
+  const loadSig = t => fetch('api/prices?range=5y&ticker=' + encodeURIComponent(t) + '&m=' + Math.floor(Date.now() / 60000))
+    .then(async res => {
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
+      return { t, d, sims: {}, inds: {} };
+    });
   function getSig(t) {
     if (!sigCache[t]) {
-      sigCache[t] = fetch('api/prices?range=5y&ticker=' + encodeURIComponent(t))
-        .then(async res => {
-          const d = await res.json().catch(() => ({}));
-          if (!res.ok || !d.close || !d.close.length) throw new Error(d.error || '주가 없음');
-          return { t, d, sims: {}, inds: {} };
-        });
+      sigCache[t] = loadSig(t);
       sigCache[t].catch(() => delete sigCache[t]); // 실패하면 다음에 다시 시도
     }
     return sigCache[t];
+  }
+  // 이미 받은 종목만 새로 받기. 실패하면 이전 값을 그대로 둠 (화면이 멈추거나 비지 않게)
+  async function refreshSig(t) {
+    try { const r = await loadSig(t); sigCache[t] = Promise.resolve(r); return true; } catch (e) { return false; }
   }
   function simOf(r, s) {
     const rule = sltpOf(r.t, s.id), k = simKey(s, rule);
@@ -1599,7 +1605,8 @@
     document.body.classList.remove('modal-open');
     if (modalChart) { modalChart.remove(); modalChart = null; }
   }
-  async function showModalTicker(t) {
+  async function showModalTicker(t, live) {
+    if (live) return liveModal(t);
     const moved = modalTicker !== t;
     modalTicker = t;
     // 다른 종목으로 옮길 때만: 이 종목에 손절·익절을 적용한 신호가 있으면 그 신호로 먼저 (같은 종목에서 신호를 바꾸는 건 그대로 둠)
@@ -1620,6 +1627,26 @@
     try {
       const r = await getSig(t);
       if (modalTicker !== t || $('#chart-modal').hidden) return;
+      drawModal(r);
+    } catch (e) {
+      if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
+    }
+  }
+  // 1분마다 새 주가로 다시 그리기: '불러오는 중'으로 지우지 않고, 보던 차트 구간도 그대로
+  async function liveModal(t) {
+    let r;
+    try { r = await getSig(t); } catch (e) { return; }
+    if (modalTicker !== t || $('#chart-modal').hidden) return;
+    let range = null;
+    try { range = modalChart && modalChart.timeScale().getVisibleLogicalRange(); } catch (e) { /* 없음 */ }
+    if (modalChart) { modalChart.remove(); modalChart = null; }
+    drawModal(r);
+    try { if (range && modalChart) modalChart.timeScale().setVisibleLogicalRange(range); } catch (e) { /* 그대로 */ }
+  }
+  // 가격 시각: 한국 시간으로 (예: 11-24 05:59)
+  const kstTime = iso => { if (!iso) return ''; const x = new Date(new Date(iso).getTime() + 9 * 3600e3).toISOString(); return x.slice(5, 10) + ' ' + x.slice(11, 16); };
+  function drawModal(r) {
+    {
       const s0 = activeStrats()[0], sim0 = s0 && simOf(r, s0), st = sigState(r.d, sim0), ss = statsOf(sim0), L = r.d.close.length - 1;
       const chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
       pickRates = {};
@@ -1627,14 +1654,30 @@
       renderPickers();
       const ex = extOf(r.d), ea = earnOf(r.d);
       $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)}${ex ? ` · <span class="ext-quote">${ex.label} ${fmtP(ex.price)} ${fmtR(ex.chg)}</span>` : ''}${(pv => pv && pv.short ? ` <span class="sig-tag ${pv.cls}" title="${esc(pv.text)}">${pv.label} 기준 ${pv.short}?</span>` : '')(extPreview(r, s0))}${ea ? ` · <span class="earn-tag ${ea.near ? 'near' : ''}">${ea.near ? '⚠ ' : ''}${esc(ea.text)}</span>` : ''} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span>` +
-        (ss ? ` · <b>승률 ${Math.round(ss.rate * 100)}%</b> <span class="muted small">(거래 ${ss.n}번 · 누적 ${(ss.total * 100).toFixed(0)}%)</span>` : '') + ` <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
+        (ss ? ` · <b>승률 ${Math.round(ss.rate * 100)}%</b> <span class="muted small">(거래 ${ss.n}번 · 누적 ${(ss.total * 100).toFixed(0)}%)</span>` : '') +
+        ` <span class="muted small" title="열려 있는 동안 1분마다 새 주가를 받습니다. 장중에는 오늘 봉이 지금 가격으로 계속 바뀝니다">${r.d.lastTime ? `가격 ${kstTime(r.d.lastTime)} (한국 시간)` : `${r.d.time[L]} 종가`} · 1분마다 자동 갱신</span>`;
       const sets = s0 && !sim0.error ? [{ strat: s0, sim: sim0 }] : [];
       modalChart = window.SigChart.draw($('#modal-sig'), r.d, sets, activeInds().map(ind => ({ ind, out: indOf(r, ind) })).filter(x => !x.out.error), { bars: 160, ext: ex, earn: ea });
       renderSigInfo(r);
-    } catch (e) {
-      if (modalTicker === t) $('#modal-sub').textContent = '주가를 불러오지 못했습니다: ' + (e.message || e);
     }
   }
+  // 실시간 갱신: 화면이 보이고 차트 탭이 열려 있을 때만, 1분마다 목록 종목 + 보던 종목을 새로 받음
+  let liveBusy = false;
+  async function liveTick() {
+    if (liveBusy || document.hidden || $('#chart-modal').hidden) return;
+    liveBusy = true;
+    try {
+      const ts = [...new Set([modalTicker, ...watch].filter(t => t && sigCache[t]))];
+      let ok = false;
+      for (let k = 0; k < ts.length; k += 4) ok = (await Promise.all(ts.slice(k, k + 4).map(refreshSig))).some(Boolean) || ok;
+      if (!ok || document.hidden || $('#chart-modal').hidden) return;
+      if (!drag) renderWatch();
+      if (modalTicker) showModalTicker(modalTicker, true);
+    } finally { liveBusy = false; }
+  }
+  setInterval(liveTick, 60000);
+  // 다른 탭에 있다가 돌아오면 바로 한 번
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) liveTick(); });
   const GRP_KEY = 'dcf-wl-open';
   let grpOpen = lsGet(GRP_KEY, []);
   // 목록 기준: 'ticker' = 종목마다 손절·익절을 적용한 신호 (없으면 지금 고른 신호), 'current' = 모두 지금 고른 신호
