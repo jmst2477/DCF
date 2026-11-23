@@ -1685,7 +1685,10 @@
       const st = wlMode === 'ticker' && !STRATS.some(x => x.id === tstrat[t]) ? { short: '', cls: 'none' } : sigState(r.d, sim0);
       const L = r.d.close.length - 1, chg = L > 0 ? r.d.close[L] / r.d.close[L - 1] - 1 : 0;
       const ea = earnOf(r.d);
-      el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}${ea && ea.near ? ` <span class="sig-pill earn" title="${esc(ea.text)}">실적 ${ea.dday ? 'D-' + ea.dday : '오늘'}</span>` : ''}`;
+      // 장전·장후 미리보기 (★ 없는 종목은 위와 똑같이 표시 안 함)
+      const pv = st.cls === 'none' && wlMode === 'ticker' && !STRATS.some(x => x.id === tstrat[t]) ? null : extPreview(r, s0);
+      const pvOn = pv && pv.short && pv.cls !== st.cls;
+      el.innerHTML = `${fmtR(chg)}${st.short ? ` <span class="sig-pill ${st.cls}">${st.short}</span>` : ''}${pvOn ? ` <span class="sig-pill ext ${pv.cls}" title="${esc(pv.text)} (미리보기)">${pv.label} ${pv.short}?</span>` : ''}${ea && ea.near ? ` <span class="sig-pill earn" title="${esc(ea.text)}">실적 ${ea.dday ? 'D-' + ea.dday : '오늘'}</span>` : ''}`;
       const rt = list.querySelector(`.wl-rate[data-r="${CSS.escape(t)}"]`);
       if (rt && sim0 && !sim0.error) {
         const ru = sltpOf(t, s0.id), other = s0.id !== stratSel;
@@ -1694,7 +1697,7 @@
         rt.innerHTML = esc((other ? (s0.short || s0.name) + ' · ' : '') + rateTxt(st0)) + (st0 ? ` · <span class="chg ${st0.total >= 0 ? 'up' : 'down'}" title="${esc(btName())} 누적 수익률 (수수료 포함)">${st0.total >= 0 ? '+' : ''}${(st0.total * 100).toFixed(0)}%</span>` : '') + (ru.sl || ru.tp || tstrat[t] === s0.id ? ' <span class="sltp-tag">손익절 설정</span>' : '');
       }
       const li = el.closest('li');
-      if (li) li.dataset.sig = st.cls;
+      if (li) { li.dataset.sig = st.cls; if (pvOn) li.dataset.ext = pv.cls; else delete li.dataset.ext; }
       // 사전에 없는 종목은 야후 업종으로 테마를 붙입니다
       if (watch.includes(t) && autoTheme(t, r.d.profile)) {
         saveThemes(); renderThemes();
@@ -1747,8 +1750,13 @@
     const on = $('#wl-only').checked;
     $('#wl-list').classList.toggle('only', on);
     $('#wl-none').hidden = !on || !!$('#wl-list li[data-sig="buy"], #wl-list li[data-sig="sell"]');
+    const ex = $('#wl-ext-only').checked;
+    $('#wl-list').classList.toggle('ext-only', ex);
+    $('#wl-ext-none').hidden = !ex || !!$('#wl-list li[data-ext]');
   }
-  $('#wl-only').addEventListener('change', updateOnly);
+  // 두 칸은 하나만 켬
+  $('#wl-only').addEventListener('change', () => { if ($('#wl-only').checked) $('#wl-ext-only').checked = false; updateOnly(); });
+  $('#wl-ext-only').addEventListener('change', () => { if ($('#wl-ext-only').checked) $('#wl-only').checked = false; updateOnly(); });
   $('#wl-mode').addEventListener('click', e => {
     const b = e.target.closest('[data-wl-mode]');
     if (!b || b.dataset.wlMode === wlMode) return;

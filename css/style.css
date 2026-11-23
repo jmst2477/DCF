@@ -418,3 +418,10 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 
 /* 시간외 가격 기준 신호 미리보기 */
 .ext-prev { margin: 4px 0; }
+
+/* 관심 종목: 장전·장후 가격 기준 미리보기 */
+.sig-pill.ext { background: transparent; border: 1px dashed currentColor; }
+.sig-pill.ext.buy { color: var(--up); }
+.sig-pill.ext.sell { color: var(--down); }
+.wl-list.ext-only li:not([data-ext]):not(.wl-sec) { display: none; }
+.wl-list.ext-only li.fold[data-ext] { display: flex; }
