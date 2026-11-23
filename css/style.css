@@ -415,3 +415,6 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 /* 손절·익절 찾기: 최소 기준 칸 */
 .bt-min { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 6px 0 8px; padding: 8px 10px; background: var(--soft); border-radius: 10px; }
 .bt-min input { width: 56px; padding: 4px 6px; font-size: 14px; text-align: right; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+
+/* 시간외 가격 기준 신호 미리보기 */
+.ext-prev { margin: 4px 0; }

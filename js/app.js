@@ -454,6 +454,22 @@
     if (!e || !(e.price > 0) || !e.date || e.date < d.time[L]) return null;
     return { label: e.session === 'pre' ? '장전' : '장후', price: e.price, chg: e.price / d.close[L] - 1, time: e.time };
   }
+  // 시간외 미리보기: 장전·장후 마지막 가격이 그대로 다음 종가가 된다고 가정하고 신호를 다시 계산.
+  // 진짜 신호·승률·카톡 알림은 정규장 종가만 씀. 이건 화면에 '미리보기'로만 보여 줌
+  function extPreview(r, s) {
+    const d = r.d, ex = extOf(d), L = d.close.length - 1;
+    if (!ex || !s) return null;
+    const p = ex.price, d2 = {};
+    for (const k in d) d2[k] = Array.isArray(d[k]) ? d[k].slice() : d[k];
+    d2.time.push(d.ext.date > d.time[L] ? d.ext.date : d.time[L] + '+');
+    d2.open.push(p); d2.high.push(p); d2.low.push(p); d2.close.push(p); if (d2.volume) d2.volume.push(0);
+    let st;
+    try { st = sigState(d2, simulate(d2, s, sltpOf(r.t, s.id))); } catch (e) { return null; }
+    const now = sigState(d, simOf(r, s));
+    const what = st.cls === 'buy' ? '매수 신호가 나옵니다' : st.cls === 'sell' ? '청산 신호가 나옵니다' : now.cls === 'hold' && st.cls === 'none' ? '손절·익절로 정리됩니다' : '새 신호는 없습니다';
+    return { cls: st.cls, short: st.cls === 'buy' ? '매수' : st.cls === 'sell' ? '청산' : '', label: ex.label, price: p,
+      text: `${ex.label} ${fmtP(p)} 그대로 마감하면 ${what}` };
+  }
   // 다음 실적 발표일 (오늘 이후만). near = 7일 안: 발표 전후 큰 변동으로 신호가 잘 안 맞으니 주의
   function earnOf(d) {
     const e = d.earnings;
@@ -852,7 +868,7 @@
         html = `<div class="strat-row" style="--c:${s.color}">
           <div class="strat-head"><i></i><b>${esc(s.name)}</b><span class="sig-badge ${st.cls}">${st.text}</span></div>
           <p class="strat-desc muted small">${esc(s.desc || '')}</p>
-          <p class="sig-last">${lastTxt}</p>${earnWarn(d, st)}${stats ? `<p class="sig-stats small">${stats}</p>` : ''}</div>`;
+          <p class="sig-last">${lastTxt}</p>${(pv => pv ? `<p class="ext-prev small"><span class="sig-tag ${pv.cls}">미리보기</span> ${esc(pv.text)} <span class="muted">(시간외는 거래가 적어 정규장 종가와 다를 수 있습니다. 실제 신호·알림은 정규장 종가 기준)</span></p>` : '')(extPreview(r, s))}${earnWarn(d, st)}${stats ? `<p class="sig-stats small">${stats}</p>` : ''}</div>`;
       }
       html += aboutHtml(s);
     }
@@ -1610,7 +1626,7 @@
       STRATS.forEach(x => { const sm = simOf(r, x); if (!sm.error) pickRates[x.id] = statsOf(sm); });
       renderPickers();
       const ex = extOf(r.d), ea = earnOf(r.d);
-      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)}${ex ? ` · <span class="ext-quote">${ex.label} ${fmtP(ex.price)} ${fmtR(ex.chg)}</span>` : ''}${ea ? ` · <span class="earn-tag ${ea.near ? 'near' : ''}">${ea.near ? '⚠ ' : ''}${esc(ea.text)}</span>` : ''} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span>` +
+      $('#modal-sub').innerHTML = `${fmtP(r.d.close[L])} ${fmtR(chg)}${ex ? ` · <span class="ext-quote">${ex.label} ${fmtP(ex.price)} ${fmtR(ex.chg)}</span>` : ''}${(pv => pv && pv.short ? ` <span class="sig-tag ${pv.cls}" title="${esc(pv.text)}">${pv.label} 기준 ${pv.short}?</span>` : '')(extPreview(r, s0))}${ea ? ` · <span class="earn-tag ${ea.near ? 'near' : ''}">${ea.near ? '⚠ ' : ''}${esc(ea.text)}</span>` : ''} · ${s0 ? `<span class="strat-name" style="--c:${s0.color}"><i></i>${esc(s0.short)}</span> ` : ''}<span class="sig-tag ${st.cls}">${st.text}</span>` +
         (ss ? ` · <b>승률 ${Math.round(ss.rate * 100)}%</b> <span class="muted small">(거래 ${ss.n}번 · 누적 ${(ss.total * 100).toFixed(0)}%)</span>` : '') + ` <span class="muted small">${r.d.time[L]} 종가 기준</span>`;
       const sets = s0 && !sim0.error ? [{ strat: s0, sim: sim0 }] : [];
       modalChart = window.SigChart.draw($('#modal-sig'), r.d, sets, activeInds().map(ind => ({ ind, out: indOf(r, ind) })).filter(x => !x.out.error), { bars: 160, ext: ex, earn: ea });
