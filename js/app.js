@@ -1615,6 +1615,7 @@
     if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) searchRefresh(); // 열려 있으면 새 종목으로 다시 계산
     renderWatch();
     $('#modal-title').textContent = t;
+    if (moved) { $('#opt-body').innerHTML = '<p class="muted small">펼치면 불러옵니다.</p>'; loadOpt(t); }
     $('#modal-sub').textContent = '불러오는 중…';
     $('#modal-sub').className = 'modal-sub';
     if (modalChart) { modalChart.remove(); modalChart = null; }
@@ -1661,6 +1662,39 @@
       renderSigInfo(r);
     }
   }
+  // 옵션 요약 (api/options). 펼쳤을 때만 받고, 종목마다 10분 동안 다시 받지 않음
+  const optCache = {};
+  const big = v => (v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(Math.round(v)));
+  const pcTxt = v => (v == null ? '-' : v.toFixed(2) + (v >= 1.3 ? ' (풋 많음 · 하락 대비가 많음)' : v <= 0.7 ? ' (콜 많음 · 상승 기대가 많음)' : ' (보통)'));
+  function optExpHtml(e, price) {
+    const mv = e.move && e.move.pct != null ? `±${(e.move.pct * 100).toFixed(1)}% (${fmtP(price - e.move.usd)} ~ ${fmtP(price + e.move.usd)})` : '-';
+    const walls = (a, cls) => a.length ? a.map(w => `<span class="opt-wall ${cls}">${fmtP(w.strike)} <span class="muted">${big(w.oi)}</span></span>`).join(' ') : '<span class="muted">-</span>';
+    const mp = e.maxPain != null ? `${fmtP(e.maxPain)} <span class="muted">(지금보다 ${fmtR(e.maxPain / price - 1)})</span>` : '-';
+    return `<div class="opt-exp"><h4>${esc(e.expiry || '')} 만기 <span class="muted small">${e.days != null ? e.days + '일 남음' : ''}</span></h4><dl class="opt-grid">
+      <dt>예상 변동폭</dt><dd>${mv}<br><span class="muted small">등가격 콜+풋 값으로 본 만기까지 움직일 폭</span></dd>
+      <dt>내재 변동성</dt><dd>${e.iv != null ? (e.iv * 100).toFixed(0) + '% (연율)' : '-'}</dd>
+      <dt>풋·콜 비율</dt><dd>미결제약정 ${pcTxt(e.pcOI)}<br><span class="muted small">오늘 거래량 ${e.pcVol == null ? '-' : e.pcVol.toFixed(2)} · 콜 ${big(e.callVol)} / 풋 ${big(e.putVol)}</span></dd>
+      <dt>맥스 페인</dt><dd>${mp}<br><span class="muted small">만기에 옵션 산 사람들이 가장 적게 버는 가격</span></dd>
+      <dt>위쪽 콜 벽</dt><dd>${walls(e.callWall, 'call')}<br><span class="muted small">콜 미결제약정이 많은 행사가 · 저항 후보</span></dd>
+      <dt>아래쪽 풋 벽</dt><dd>${walls(e.putWall, 'put')}<br><span class="muted small">풋 미결제약정이 많은 행사가 · 지지 후보</span></dd>
+    </dl></div>`;
+  }
+  async function loadOpt(t) {
+    const body = $('#opt-body');
+    if (!t || !$('#opt-box').open) return;
+    const c = optCache[t];
+    if (!c || Date.now() - c.at > 600e3) {
+      body.innerHTML = '<p class="muted small">옵션 불러오는 중…</p>';
+      optCache[t] = { at: Date.now(), p: fetch('api/options?ticker=' + encodeURIComponent(t)).then(async res => { const j = await res.json().catch(() => ({})); if (!res.ok) throw new Error(j.error || '옵션 조회 실패'); return j; }) };
+      optCache[t].p.catch(() => delete optCache[t]);
+    }
+    let j;
+    try { j = await optCache[t].p; } catch (e) { if (modalTicker === t) body.innerHTML = `<p class="muted small">${esc(e.message || String(e))}</p>`; return; }
+    if (modalTicker !== t) return;
+    if (j.none || !j.expiries || !j.expiries.length) { body.innerHTML = `<p class="muted small">${esc(j.none || '옵션 데이터가 없습니다.')}</p>`; return; }
+    body.innerHTML = `<p class="small">${esc(t)} 주가 ${fmtP(j.price)} 기준</p>` + j.expiries.map(e => optExpHtml(e, j.price)).join('');
+  }
+  $('#opt-box').addEventListener('toggle', () => loadOpt(modalTicker));
   // 실시간 갱신: 화면이 보이고 차트 탭이 열려 있을 때만, 1분마다 목록 종목 + 보던 종목을 새로 받음
   let liveBusy = false;
   async function liveTick() {

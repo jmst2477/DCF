@@ -425,3 +425,15 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .sig-pill.ext.sell { color: var(--down); }
 .wl-list.ext-only li:not([data-ext]):not(.wl-sec) { display: none; }
 .wl-list.ext-only li.fold[data-ext] { display: flex; }
+
+/* 옵션 요약 */
+#opt-box { margin-top: 8px; }
+.opt-exp { margin: 10px 0; }
+.opt-exp h4 { margin: 0 0 6px; font-size: 15px; }
+.opt-grid { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; margin: 0; font-size: 14px; }
+.opt-grid dt { color: var(--sub); }
+.opt-grid dd { margin: 0; }
+.opt-wall { display: inline-block; padding: 1px 6px; border-radius: 8px; margin: 1px 2px 1px 0; font-weight: 600; }
+.opt-wall.call { background: color-mix(in srgb, var(--up) 14%, var(--card)); color: var(--up); }
+.opt-wall.put { background: color-mix(in srgb, var(--down) 14%, var(--card)); color: var(--down); }
+@media (max-width: 600px) { .opt-grid { grid-template-columns: 1fr; } .opt-grid dt { margin-top: 4px; } }

@@ -132,11 +132,21 @@ export async function makeReport(deps, { data = {}, pos = {} } = {}) {
     return { t, sec, secKo: (SECTORS.find(s => s[2] === sec) || [])[1] || null, above: last(c) > s200, rs3, score, star: st ? st.strat.name : null,
       cur, best, better: !!(best && cur && best.id !== cur.id && best.ret - cur.ret > 0.15), held: !!pos[t], earnings: ed || null };
   })).filter(r => r && !r.error);
-  const recs = rows.filter(r => r.above && r.rs3 > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+  // 옵션(풋·콜 비율, 바로 위 콜 벽)으로 추천 점수를 조금 조정. 추세 조건을 넘은 상위 8종목만 받음 (deps.options 없으면 건너뜀)
+  const cand = rows.filter(r => r.above && r.rs3 > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+  if (deps.options) {
+    (await pool(cand, 4, x => deps.options(x.t))).forEach((o, i) => {
+      if (o && !o.error) { cand[i].opt = o; cand[i].score += o.adj || 0; } else if (o && o.error) errors.push(`옵션 ${cand[i].t}: ${o.error}`);
+    });
+  }
+  const recs = cand.sort((a, b) => b.score - a.score).slice(0, 3);
+  // 시장 전체: S&P500(SPY) 옵션
+  let mktOpt = null;
+  if (deps.options) { try { mktOpt = await deps.options("SPY"); } catch (e) { errors.push(`옵션 SPY: ${e.message || e}`); } }
   const now = deps.now ? deps.now() : new Date();
   const soon = rows.filter(r => r.earnings && r.star && Date.parse(r.earnings) - now.getTime() < 8 * 864e5 && Date.parse(r.earnings) >= now.getTime() - 864e5);
 
-  const out = { date, spy, qqq, vix, vixTxt, sectors, strong, weak, rates, rows, recs, better: rows.filter(r => r.better), soon, errors };
+  const out = { date, spy, qqq, vix, vixTxt, mktOpt, sectors, strong, weak, rates, rows, recs, better: rows.filter(r => r.better), soon, errors };
   out.overall = overallOf(out);
   return out;
 }
@@ -153,6 +163,8 @@ export function overallOf(r) {
   s += m; if (m) why.push(`금리·유동성 ${r.rates.macroTxt}`);
   const up = r.sectors.filter(x => x.above).length;
   if (r.sectors.length) { const b = up >= 8 ? 1 : up <= 3 ? -1 : 0; s += b; why.push(`섹터 ${up}/${r.sectors.length}개 상승 추세`); }
+  // S&P500 옵션 풋·콜 비율: 풋이 아주 많으면(1.5 이상) 시장이 하락에 크게 대비 중 → -1 (근거에만 보이고 점수는 작게)
+  if (r.mktOpt && r.mktOpt.pcOI != null && r.mktOpt.pcOI >= 1.5) { s -= 1; why.push(`S&P 옵션 풋 쏠림 ${r.mktOpt.pcOI.toFixed(2)}`); }
   const [level, action] = s >= 3 ? ["공격", "매수 신호는 대부분 승인해도 좋은 환경"]
     : s >= 0 ? ["보통", "강한 섹터·추천 종목 신호 위주로 골라서 승인"]
     : s >= -2 ? ["조심", "승인을 줄이고 손절을 지키기"]
@@ -167,6 +179,7 @@ export function reportMessages(r) {
   if (r.spy) m1.push(`시장: ${r.spy.kind} (S&P500 200일선 ${pct(r.spy.dist)}, 한 달 ${pct(r.spy.m1)})`);
   if (r.qqq) m1.push(`나스닥100: ${r.qqq.kind} (${r.qqq.dd > -0.005 ? "1년 고점 근처" : `1년 고점 대비 ${pct(r.qqq.dd)}`})`);
   if (r.vix != null) m1.push(`VIX ${r.vix.toFixed(1)} ${r.vixTxt}`);
+  if (r.mktOpt && r.mktOpt.txt) m1.push(`S&P500 옵션: ${r.mktOpt.txt}`);
   out.push(m1.join("\n"));
   if (r.sectors.length) out.push(`🔥 강한 섹터 (3개월, S&P 대비)\n${r.strong.map(s => `${s.ko} ${pct(s.rs3)}`).join(" · ")}\n🧊 약한 섹터\n${r.weak.map(s => `${s.ko} ${pct(s.rs3)}`).join(" · ")}`);
   const R = r.rates, m3 = [`💧 금리·유동성: ${R.macroTxt}`];
@@ -175,7 +188,7 @@ export function reportMessages(r) {
   if (R.hy != null) m3.push(`하이일드 스프레드 ${R.hy.toFixed(2)}%${R.hyChg != null ? ` (한 달 ${R.hyChg >= 0 ? "+" : ""}${R.hyChg.toFixed(2)})` : ""}`);
   if (R.dxy1 != null) m3.push(`달러지수 한 달 ${pct(R.dxy1)}`);
   out.push(m3.join("\n"));
-  if (r.recs.length) out.push(`⭐ 내 종목 중 추천 (추세·상대강도·섹터)\n${r.recs.map(x => `${x.t}${x.secKo ? `(${x.secKo})` : ""} 3개월 ${pct(x.rs3, 0)} · 잘 맞는 신호 ${x.best ? `${x.best.name} ${pct(x.best.ret, 0)}` : "-"}${x.star ? "" : " · ★없음"}`).join("\n")}`);
+  if (r.recs.length) out.push(`⭐ 내 종목 중 추천 (추세·상대강도·섹터)\n${r.recs.map(x => `${x.t}${x.secKo ? `(${x.secKo})` : ""} 3개월 ${pct(x.rs3, 0)} · 잘 맞는 신호 ${x.best ? `${x.best.name} ${pct(x.best.ret, 0)}` : "-"}${x.star ? "" : " · ★없음"}${x.opt && x.opt.txt ? `\n  옵션: ${x.opt.txt}` : ""}`).join("\n")}`);
   else if (r.rows.length) out.push("⭐ 내 종목 중 지금 추세·상대강도 조건을 모두 넘는 종목이 없습니다.");
   const m5 = [];
   r.better.slice(0, 3).forEach(x => m5.push(`${x.t}: 지금 ★ ${x.cur.name} ${pct(x.cur.ret, 0)} → ${x.best.name} ${pct(x.best.ret, 0)} 이 2년간 더 좋았음`));
@@ -210,14 +223,17 @@ export async function discoverCandidates(deps, { exclude = [], strats = [], TA, 
     const score = rs3 * 100 + rs1 * 50 + (dist > -0.03 ? 5 : 0) + (best && best.win >= 0.6 ? 5 : 0);
     return { t: x.t, name: x.name, capB: x.capK ? Math.round(x.capK / 1e6) : null, rs3, rs1, dist, best, score };
   })).filter(r => r && !r.error);
-  return { at: new Date().toISOString(), scanned: list.length, picks: rows.sort((a, b) => b.score - a.score).slice(0, 5) };
+  // 옵션으로 점수 조금 조정 (상위 10종목만 받음)
+  const cand = rows.sort((a, b) => b.score - a.score).slice(0, 10);
+  if (deps.options) (await pool(cand, 4, x => deps.options(x.t))).forEach((o, i) => { if (o && !o.error) { cand[i].opt = o; cand[i].score += o.adj || 0; } });
+  return { at: new Date().toISOString(), scanned: list.length, picks: cand.sort((a, b) => b.score - a.score).slice(0, 5) };
 }
 // 카톡 한 통 200자라 종목이 많으면 여러 통으로 나눈다 (잘리지 않게). 반환: 메시지 배열
 export function discoverMessage(dsc) {
   if (!dsc || !dsc.picks) return [];
   if (!dsc.picks.length) return [`🔎 이번 주 새 후보: ${dsc.scanned}종목을 봤지만 조건(추세·상대강도·고점 근처)을 다 넘는 종목이 없습니다.`];
   const lines = dsc.picks.map(x => {
-    const l = `${x.t}${x.name ? ` ${String(x.name).slice(0, 14)}` : ""}\n  3개월 S&P대비 ${pct(x.rs3, 0)} · 1년 고점 ${x.dist > -0.005 ? "근처" : pct(x.dist, 0)}${x.best ? `\n  잘 맞는 신호: ${x.best.name} ${pct(x.best.ret, 0)}` : ""}`;
+    const l = `${x.t}${x.name ? ` ${String(x.name).slice(0, 14)}` : ""}\n  3개월 S&P대비 ${pct(x.rs3, 0)} · 1년 고점 ${x.dist > -0.005 ? "근처" : pct(x.dist, 0)}${x.best ? `\n  잘 맞는 신호: ${x.best.name} ${pct(x.best.ret, 0)}` : ""}${x.opt && x.opt.txt ? `\n  옵션: ${x.opt.txt}` : ""}`;
     return l;
   });
   const out = [];
