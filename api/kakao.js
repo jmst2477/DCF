@@ -18,6 +18,8 @@ import { splitMemo } from "./_memo.js";
 import { reportSummary, reportPage } from "./_reportpage.js";
 import { newsBlocks } from "./_news.js";
 import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
+import { optionsOf, optionView } from "./options.js";
+import { yahooSession } from "./dcf-inputs.js";
 import { dailyBars, summary } from "./prices.js";
 
 function env(suffixes) {
@@ -124,6 +126,17 @@ async function sendMemo1(text, link, button) {
   if (!r.ok || j.result_code !== 0) throw new Error("카카오톡 보내기 실패: " + (j.msg || j.result_code || r.status));
 }
 
+// 옵션 요약 → 보고서용 한 줄 판단. 야후 세션은 한 번만 받아 같이 씀. 실패한 종목은 { error } (보고서는 계속)
+function optDeps() {
+  let sess = null;
+  return async t => {
+    try {
+      if (!sess) sess = yahooSession();
+      return optionView(await optionsOf(t, await sess));
+    } catch (e) { return { error: String((e && e.message) || e).slice(0, 80) }; }
+  };
+}
+
 // 신호 확인 → 새 신호가 있으면 보냄. force = 사이트의 "지금 확인" (같은 날 이미 보냈어도, 신호가 없어도 결과를 보냄)
 async function runCheck(force) {
   const s = await jget(K.data);
@@ -151,7 +164,7 @@ async function fred(id) {
 async function runReport(manual = false) {
   const s = await jget(K.data);
   const data = (s && s.data) || {};
-  const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA }, { data, pos: (await jget("agent:pos")) || {} });
+  const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA, options: optDeps() }, { data, pos: (await jget("agent:pos")) || {} });
   const news = await jget(K.news);
   const fresh = news && Date.now() - Date.parse(news.at) < 30 * 3600e3;
   const dsc = await jget(K.discover);
@@ -186,7 +199,7 @@ async function runDiscover() {
     for (const ex of ["NAS", "NYS"]) { try { out.push(...(await kis.search(ex, { minCapK: 10000000, minPrice: 10 }))); } catch (e) { errors.push(`${ex}: ${e.message || e}`); } }
     return out;
   };
-  const r = await discoverCandidates({ screen, bars: (t, range) => dailyBars(t, range) }, { exclude: wl.concat(Object.keys((await jget("agent:pos")) || {})), strats: strategies(data), TA: libs().TA });
+  const r = await discoverCandidates({ screen, bars: (t, range) => dailyBars(t, range), options: optDeps() }, { exclude: wl.concat(Object.keys((await jget("agent:pos")) || {})), strats: strategies(data), TA: libs().TA });
   const saved = { ...r, errors };
   await redis("SET", K.discover, JSON.stringify(saved));
   return saved;
