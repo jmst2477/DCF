@@ -437,3 +437,10 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .opt-wall.call { background: color-mix(in srgb, var(--up) 14%, var(--card)); color: var(--up); }
 .opt-wall.put { background: color-mix(in srgb, var(--down) 14%, var(--card)); color: var(--down); }
 @media (max-width: 600px) { .opt-grid { grid-template-columns: 1fr; } .opt-grid dt { margin-top: 4px; } }
+/* 결과 표: 좁은 화면에서도 오른쪽이 잘리지 않게 칸을 좁히고 신호 이름은 줄바꿈 허용 */
+.bt-search .grid th, .bt-search .grid td { padding: 8px 6px; }
+#bt-opt .grid td:nth-child(2) { white-space: normal; }
+.opt-sum { margin: 6px 0 8px; padding: 8px 10px; background: var(--soft); border-radius: 10px; font-size: 14px; }
+/* 표·결과 칸 끌어서 움직이기 */
+.drag-scroll { cursor: grab; }
+body.drag-scrolling, body.drag-scrolling * { cursor: grabbing !important; user-select: none; }

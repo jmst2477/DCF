@@ -785,11 +785,19 @@
     btChanged();
     const pct = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
     const done = out.filter(x => x.b).length;
+    // 거래마다 500만원씩 샀다면 번 돈 (매번 같은 금액, 수익을 다시 넣지 않음). 거래별 수익률에 사고팔 때 수수료가 이미 들어 있음
+    const PER = 5e6, fee = bt.fee / 100;
+    const money = st => PER * st.n * st.avg;
+    const man = v => `${v >= 0 ? '+' : '-'}${Math.round(Math.abs(v) / 1e4).toLocaleString('ko-KR')}만원`;
+    const won = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${man(v)}</span>`;
+    const okRows = out.filter(x => x.b), sumN = okRows.reduce((a, x) => a + x.b.st.n, 0), sumM = okRows.reduce((a, x) => a + money(x.b.st), 0);
+    const sumFee = sumN * PER * fee * 2;
     optRender(`<p class="small pos">${done}종목에 적용했습니다${out.length > done ? `, ${out.length - done}종목은 기준을 넘는 조합이 없어 그대로 두었습니다` : ''}.</p>
-      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th>최근 1년</th><th>전</th></tr></thead><tbody>${out.map(x => x.b
-        ? `<tr><td><b>${esc(x.t)}</b></td><td>${esc(x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
-        : `<tr><td><b>${esc(x.t)}</b></td><td colspan="7" class="muted small">${x.err ? '주가를 불러오지 못함' : '기준을 넘는 조합 없음'} · 그대로 둠</td><td class="muted small">${esc(x.before)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="muted small">지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 골랐습니다. 마음에 안 들면 그 종목에서 '손절·익절 풀기'나 '손절·익절 찾기'로 바꾸세요.</p>`);
+      ${okRows.length ? `<p class="opt-sum">거래당 500만원씩 샀다면 (${esc(btName())}): 거래 ${sumN.toLocaleString('ko-KR')}번 · 총 수익 <b>${won(sumM)}</b> <span class="muted small">수수료 약 ${Math.round(sumFee / 1e4).toLocaleString('ko-KR')}만원 빼고 (한 번 살 때·팔 때 각 ${bt.fee}%), 세금 전</span></p>` : ''}
+      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="거래마다 500만원씩 샀다면 번 돈 (수수료 포함, 세금 전)">500만원씩</th><th>최근 1년</th><th>전</th></tr></thead><tbody>${out.map(x => x.b
+        ? `<tr><td><b>${esc(x.t)}</b></td><td title="${esc(x.b.s.name)}">${esc(x.b.s.short || x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${won(money(x.b.st))}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
+        : `<tr><td><b>${esc(x.t)}</b></td><td colspan="8" class="muted small">${x.err ? '주가를 불러오지 못함' : '기준을 넘는 조합 없음'} · 그대로 둠</td><td class="muted small">${esc(x.before)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="muted small">지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 골랐습니다. 마음에 안 들면 그 종목에서 '손절·익절 풀기'나 '손절·익절 찾기'로 바꾸세요. '500만원씩'은 거래마다 같은 금액(500만원)을 넣었다고 본 금액이고, '누적'은 번 돈을 다시 넣어 불렸다고 본 수익률이라 둘이 다르게 보일 수 있습니다.</p>`);
   });
   // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
   $('#bt-reset').addEventListener('click', () => {
@@ -1800,6 +1808,45 @@
 
   $('#btn-chart').addEventListener('click', () => openModal());
     $('#modal-close').addEventListener('click', closeModal);
+  // 표·결과 칸을 마우스로 잡고 끌어서 옆(과 위아래)으로 움직이기. 버튼·입력칸·체크칸 위에서는 원래대로 누르기
+  (() => {
+    const AREA = '.table-scroll, .bt-search', SKIP = 'a, button, input, select, textarea, label, summary, .wl-grip';
+    const canX = el => el.scrollWidth > el.clientWidth + 1, canY = el => el.scrollHeight > el.clientHeight + 1;
+    // 누른 곳에서 가장 가까운, 실제로 넘치는 칸들 (가로는 표, 세로는 결과 칸일 수 있음)
+    const areasAt = t => { const out = []; for (let el = t.closest(AREA); el; el = el.parentElement && el.parentElement.closest(AREA)) out.push(el); return out; };
+    let g = null, eatClick = false;
+    document.addEventListener('pointerover', e => {
+      if (g || e.pointerType !== 'mouse') return;
+      const el = e.target.closest && e.target.closest(AREA);
+      if (el) el.classList.toggle('drag-scroll', canX(el) || canY(el));
+    });
+    document.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !e.target.closest || e.target.closest(SKIP)) return;
+      const els = areasAt(e.target);
+      const x = els.find(canX), y = els.find(canY);
+      if (!x && !y) return;
+      e.preventDefault(); // 글자 선택 대신 끌기
+      g = { x, y, sx: e.clientX, sy: e.clientY, l: x ? x.scrollLeft : 0, t: y ? y.scrollTop : 0, moved: false };
+      document.body.classList.add('drag-scrolling');
+    });
+    window.addEventListener('pointermove', e => {
+      if (!g) return;
+      const dx = e.clientX - g.sx, dy = e.clientY - g.sy;
+      if (!g.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      g.moved = true;
+      if (g.x) g.x.scrollLeft = g.l - dx;
+      if (g.y) g.y.scrollTop = g.t - dy;
+    });
+    window.addEventListener('pointerup', () => {
+      if (!g) return;
+      eatClick = g.moved;
+      g = null;
+      document.body.classList.remove('drag-scrolling');
+      setTimeout(() => { eatClick = false; }, 0);
+    });
+    // 끌고 난 뒤 손을 뗄 때 생기는 click 은 무시 (줄이 눌리지 않게)
+    document.addEventListener('click', e => { if (eatClick) { e.preventDefault(); e.stopPropagation(); eatClick = false; } }, true);
+  })();
   $('#tabs').addEventListener('click', e => {
     const b = e.target.closest('[data-tab]');
     if (!b) return;
