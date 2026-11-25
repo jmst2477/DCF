@@ -1576,6 +1576,8 @@
   Object.keys(themes).forEach(t => { if (!watch.includes(t) || typeof themes[t] !== 'string') delete themes[t]; });
   const autoTheme = (t, profile) => { if (t in themes) return false; const g = window.THEMES.guess(t, profile); if (g) themes[t] = g; return !!g; };
   let themePick = lsGet(THEME_PICK_KEY, '');
+  // 테마 칸 접기: 접으면 한 줄만 (고른 테마는 '전체' 바로 옆으로), 펼치면 전부
+  let themeFold = lsGet('dcf-theme-fold', true) !== false;
   const saveThemes = () => lsSet(THEME_KEY, themes);
   if (watch.filter(t => autoTheme(t)).length) saveThemes();
   const themeList = () => [...new Set(watch.map(t => themes[t]).filter(Boolean))];
@@ -1584,8 +1586,12 @@
     const box = $('#wl-themes'), list = themeList();
     if (themePick && !list.includes(themePick)) { themePick = ''; lsSet(THEME_PICK_KEY, ''); }
     box.hidden = !list.length;
-    box.innerHTML = [['', '전체', watch.length], ...list.map(x => [x, x, watch.filter(t => themes[t] === x).length])]
-      .map(([v, label, n]) => `<button type="button" class="chip ${v === themePick ? 'on' : ''}" data-theme-pick="${esc(v)}">${esc(label)} <span class="muted">${n}</span></button>`).join('');
+    const order = themeFold && themePick ? [themePick, ...list.filter(x => x !== themePick)] : list;
+    box.classList.toggle('fold', themeFold);
+    box.innerHTML = `<div class="wl-themes-row">${[['', '전체', watch.length], ...order.map(x => [x, x, watch.filter(t => themes[t] === x).length])]
+      .map(([v, label, n]) => `<button type="button" class="chip ${v === themePick ? 'on' : ''}" data-theme-pick="${esc(v)}">${esc(label)} <span class="muted">${n}</span></button>`).join('')}</div>`
+      + `<button type="button" class="ghost mini wl-themes-fold" title="${themeFold ? '테마를 모두 펼쳐 봅니다' : '테마 칸을 한 줄로 줄입니다 (옆으로 끌거나 밀어서 보기)'}">${themeFold ? '펼치기 ▾' : '접기 ▴'}</button>`;
+    box.querySelector('.wl-themes-fold').hidden = list.length < 3;
   }
 
   // 맨 위 탭: chart = 차트·신호(이 화면), dcf = DCF 적정가
@@ -1810,7 +1816,7 @@
     $('#modal-close').addEventListener('click', closeModal);
   // 표·결과 칸을 마우스로 잡고 끌어서 옆(과 위아래)으로 움직이기. 버튼·입력칸·체크칸 위에서는 원래대로 누르기
   (() => {
-    const AREA = '.table-scroll, .bt-search', SKIP = 'a, button, input, select, textarea, label, summary, .wl-grip';
+    const AREA = '.table-scroll, .bt-search, .wl-themes-row', SKIP = 'a, button, input, select, textarea, label, summary, .wl-grip';
     const canX = el => el.scrollWidth > el.clientWidth + 1, canY = el => el.scrollHeight > el.clientHeight + 1;
     // 누른 곳에서 가장 가까운, 실제로 넘치는 칸들 (가로는 표, 세로는 결과 칸일 수 있음)
     const areasAt = t => { const out = []; for (let el = t.closest(AREA); el; el = el.parentElement && el.parentElement.closest(AREA)) out.push(el); return out; };
@@ -1821,7 +1827,7 @@
       if (el) el.classList.toggle('drag-scroll', canX(el) || canY(el));
     });
     document.addEventListener('pointerdown', e => {
-      if (e.pointerType !== 'mouse' || e.button !== 0 || !e.target.closest || e.target.closest(SKIP)) return;
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !e.target.closest || (e.target.closest(SKIP) && !e.target.closest('.wl-themes-row'))) return;
       const els = areasAt(e.target);
       const x = els.find(canX), y = els.find(canY);
       if (!x && !y) return;
@@ -1887,6 +1893,7 @@
     wlMode = b.dataset.wlMode; lsSet(WL_MODE_KEY, wlMode); renderWatch();
   });
   $('#wl-themes').addEventListener('click', e => {
+    if (e.target.closest('.wl-themes-fold')) { themeFold = !themeFold; lsSet('dcf-theme-fold', themeFold); renderThemes(); return; }
     const c = e.target.closest('[data-theme-pick]');
     if (!c) return;
     themePick = c.dataset.themePick;
