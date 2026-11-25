@@ -778,7 +778,7 @@
       let b = null, err = null;
       try { b = await bestFor(t); } catch (x) { err = x; }
       if (run !== optRun) return; // 닫힘
-      const before = tstrat[t] ? sName(tstrat[t]) : '없음';
+      const before = tstrat[t] ? ((STRATS.find(s => s.id === tstrat[t]) || {}).name || tstrat[t]) : '없음';
       if (b) { setSltp(t, b.s.id, { sl: b.sl, tp: b.tp }); setTickerStrat(t, b.s.id); }
       out.push({ t, b, err, before });
     }
@@ -794,8 +794,8 @@
     const sumFee = sumN * PER * fee * 2;
     optRender(`<p class="small pos">${done}종목에 적용했습니다${out.length > done ? `, ${out.length - done}종목은 기준을 넘는 조합이 없어 그대로 두었습니다` : ''}.</p>
       ${okRows.length ? `<p class="opt-sum">거래당 500만원씩 샀다면 (${esc(btName())}): 거래 ${sumN.toLocaleString('ko-KR')}번 · 총 수익 <b>${won(sumM)}</b> <span class="muted small">수수료 약 ${Math.round(sumFee / 1e4).toLocaleString('ko-KR')}만원 빼고 (한 번 살 때·팔 때 각 ${bt.fee}%), 세금 전</span></p>` : ''}
-      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="거래마다 500만원씩 샀다면 번 돈 (수수료 포함, 세금 전)">500만원씩</th><th>최근 1년</th><th>전</th></tr></thead><tbody>${out.map(x => x.b
-        ? `<tr><td><b>${esc(x.t)}</b></td><td title="${esc(x.b.s.name)}">${esc(x.b.s.short || x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${won(money(x.b.st))}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
+      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="거래마다 500만원씩 샀다면 번 돈 (수수료 포함, 세금 전)">500만원씩</th><th>최근 1년</th><th title="적용하기 전에 ★였던 신호">이전 ★</th></tr></thead><tbody>${out.map(x => x.b
+        ? `<tr><td><b>${esc(x.t)}</b></td><td>${esc(x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${won(money(x.b.st))}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
         : `<tr><td><b>${esc(x.t)}</b></td><td colspan="8" class="muted small">${x.err ? '주가를 불러오지 못함' : '기준을 넘는 조합 없음'} · 그대로 둠</td><td class="muted small">${esc(x.before)}</td></tr>`).join('')}</tbody></table></div>
       <p class="muted small">지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 골랐습니다. 마음에 안 들면 그 종목에서 '손절·익절 풀기'나 '손절·익절 찾기'로 바꾸세요. '500만원씩'은 거래마다 같은 금액(500만원)을 넣었다고 본 금액이고, '누적'은 번 돈을 다시 넣어 불렸다고 본 수익률이라 둘이 다르게 보일 수 있습니다.</p>`);
   });
