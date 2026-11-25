@@ -370,7 +370,7 @@ body.modal-open { overflow: hidden; }
 body.wl-resizing { user-select: none; cursor: col-resize; }
 
 /* 손절·익절 찾기 결과 */
-.bt-search { padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+.bt-search { padding: 8px 16px 12px; border-top: 1px solid var(--line); max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; } /* 결과가 길어도 패널 안에서 스크롤 (차트 화면 밖으로 잘리지 않게) */
 .bt-search-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 6px; }
 .bt-search-head button { margin-left: auto; }
 .bt-search table td, .bt-search table th { white-space: nowrap; }
