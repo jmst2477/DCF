@@ -722,7 +722,7 @@
   let optRun = 0;
   function optRender(result) {
     const box = $('#bt-opt');
-    const head = `<div class="bt-search-head"><b>⚡ 최적 조건 자동 적용</b> <span class="muted small">${esc(btName())} · 신호 ${STRATS.length}개 × 손절·익절 ${SL_GRID.length * TP_GRID.length}가지</span><button type="button" class="ghost mini" data-opt-close>닫기 ✕</button></div>`;
+    const head = `<div class="bt-search-head"><b>⚡ 최적 조건 자동 적용</b> <span class="muted small">${esc(btName())} · <span title="${esc(STRATS.map(x => x.name).join(', '))}">보이는 신호 ${STRATS.length}개 (가린 신호 빼고)</span> × 손절·익절 ${SL_GRID.length * TP_GRID.length}가지</span><button type="button" class="ghost mini" data-opt-close>닫기 ✕</button></div>`;
     if (!watch.length) { box.innerHTML = head + '<p class="muted small">관심 종목이 없습니다.</p>'; return; }
     box.innerHTML = head + minBox().replace(/data-bt-min/g, 'data-opt-min') +
       `<label class="bulk-all"><input type="checkbox" data-opt-all> 전체 선택</label>
