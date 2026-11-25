@@ -440,3 +440,4 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 /* 결과 표: 좁은 화면에서도 오른쪽이 잘리지 않게 칸을 좁히고 신호 이름은 줄바꿈 허용 */
 .bt-search .grid th, .bt-search .grid td { padding: 8px 6px; }
 #bt-opt .grid td:nth-child(2) { white-space: normal; }
+.opt-sum { margin: 6px 0 8px; padding: 8px 10px; background: var(--soft); border-radius: 10px; font-size: 14px; }
