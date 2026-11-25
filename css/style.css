@@ -441,3 +441,6 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 .bt-search .grid th, .bt-search .grid td { padding: 8px 6px; }
 #bt-opt .grid td:nth-child(2) { white-space: normal; }
 .opt-sum { margin: 6px 0 8px; padding: 8px 10px; background: var(--soft); border-radius: 10px; font-size: 14px; }
+/* 표·결과 칸 끌어서 움직이기 */
+.drag-scroll { cursor: grab; }
+body.drag-scrolling, body.drag-scrolling * { cursor: grabbing !important; user-select: none; }

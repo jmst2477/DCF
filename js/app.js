@@ -1808,6 +1808,45 @@
 
   $('#btn-chart').addEventListener('click', () => openModal());
     $('#modal-close').addEventListener('click', closeModal);
+  // 표·결과 칸을 마우스로 잡고 끌어서 옆(과 위아래)으로 움직이기. 버튼·입력칸·체크칸 위에서는 원래대로 누르기
+  (() => {
+    const AREA = '.table-scroll, .bt-search', SKIP = 'a, button, input, select, textarea, label, summary, .wl-grip';
+    const canX = el => el.scrollWidth > el.clientWidth + 1, canY = el => el.scrollHeight > el.clientHeight + 1;
+    // 누른 곳에서 가장 가까운, 실제로 넘치는 칸들 (가로는 표, 세로는 결과 칸일 수 있음)
+    const areasAt = t => { const out = []; for (let el = t.closest(AREA); el; el = el.parentElement && el.parentElement.closest(AREA)) out.push(el); return out; };
+    let g = null, eatClick = false;
+    document.addEventListener('pointerover', e => {
+      if (g || e.pointerType !== 'mouse') return;
+      const el = e.target.closest && e.target.closest(AREA);
+      if (el) el.classList.toggle('drag-scroll', canX(el) || canY(el));
+    });
+    document.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || !e.target.closest || e.target.closest(SKIP)) return;
+      const els = areasAt(e.target);
+      const x = els.find(canX), y = els.find(canY);
+      if (!x && !y) return;
+      e.preventDefault(); // 글자 선택 대신 끌기
+      g = { x, y, sx: e.clientX, sy: e.clientY, l: x ? x.scrollLeft : 0, t: y ? y.scrollTop : 0, moved: false };
+      document.body.classList.add('drag-scrolling');
+    });
+    window.addEventListener('pointermove', e => {
+      if (!g) return;
+      const dx = e.clientX - g.sx, dy = e.clientY - g.sy;
+      if (!g.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      g.moved = true;
+      if (g.x) g.x.scrollLeft = g.l - dx;
+      if (g.y) g.y.scrollTop = g.t - dy;
+    });
+    window.addEventListener('pointerup', () => {
+      if (!g) return;
+      eatClick = g.moved;
+      g = null;
+      document.body.classList.remove('drag-scrolling');
+      setTimeout(() => { eatClick = false; }, 0);
+    });
+    // 끌고 난 뒤 손을 뗄 때 생기는 click 은 무시 (줄이 눌리지 않게)
+    document.addEventListener('click', e => { if (eatClick) { e.preventDefault(); e.stopPropagation(); eatClick = false; } }, true);
+  })();
   $('#tabs').addEventListener('click', e => {
     const b = e.target.closest('[data-tab]');
     if (!b) return;
