@@ -421,6 +421,8 @@
       total: tr.reduce((a, x) => a * (1 + x.ret), 1) - 1,
       mdd, hold: d.close[e0] / d.open[s0] - 1, from: d.time[s0], to: d.time[e0],
       stops: tr.filter(x => x.reason).length,
+      // 번 돈을 다시 넣어 굴릴 때 거래마다 들어간 금액의 합 (시작 금액 = 1). 수수료 금액 어림에 씀
+      turn: tr.reduce((a, x) => { a.sum += a.eq * (2 + x.ret); a.eq *= 1 + x.ret; return a; }, { eq: 1, sum: 0 }).sum / 2,
     };
   }
   const rateTxt = st => (st ? `승률 ${Math.round(st.rate * 100)}%` : '거래 없음');
@@ -785,19 +787,19 @@
     btChanged();
     const pct = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
     const done = out.filter(x => x.b).length;
-    // 거래마다 500만원씩 샀다면 번 돈 (매번 같은 금액, 수익을 다시 넣지 않음). 거래별 수익률에 사고팔 때 수수료가 이미 들어 있음
+    // 500만원으로 시작해 번 돈을 다시 넣어 굴렸다면 (누적 수익률 그대로) 번 돈. 거래별 수익률에 사고팔 때 수수료가 이미 들어 있음
     const PER = 5e6, fee = bt.fee / 100;
-    const money = st => PER * st.n * st.avg;
+    const money = st => PER * st.total;
     const man = v => `${v >= 0 ? '+' : '-'}${Math.round(Math.abs(v) / 1e4).toLocaleString('ko-KR')}만원`;
     const won = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${man(v)}</span>`;
     const okRows = out.filter(x => x.b), sumN = okRows.reduce((a, x) => a + x.b.st.n, 0), sumM = okRows.reduce((a, x) => a + money(x.b.st), 0);
-    const sumFee = sumN * PER * fee * 2;
+    const sumFee = okRows.reduce((a, x) => a + PER * (x.b.st.turn || x.b.st.n) * fee * 2, 0);
     optRender(`<p class="small pos">${done}종목에 적용했습니다${out.length > done ? `, ${out.length - done}종목은 기준을 넘는 조합이 없어 그대로 두었습니다` : ''}.</p>
-      ${okRows.length ? `<p class="opt-sum">거래당 500만원씩 샀다면 (${esc(btName())}): 거래 ${sumN.toLocaleString('ko-KR')}번 · 총 수익 <b>${won(sumM)}</b> <span class="muted small">수수료 약 ${Math.round(sumFee / 1e4).toLocaleString('ko-KR')}만원 빼고 (한 번 살 때·팔 때 각 ${bt.fee}%), 세금 전</span></p>` : ''}
-      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="거래마다 500만원씩 샀다면 번 돈 (수수료 포함, 세금 전)">500만원씩</th><th>최근 1년</th><th title="적용하기 전에 ★였던 신호">이전 ★</th></tr></thead><tbody>${out.map(x => x.b
+      ${okRows.length ? `<p class="opt-sum">종목마다 500만원으로 시작해 번 돈까지 다시 넣었다면 (${esc(btName())}): ${okRows.length}종목 ${(okRows.length * 500).toLocaleString('ko-KR')}만원 · 거래 ${sumN.toLocaleString('ko-KR')}번 · 총 수익 <b>${won(sumM)}</b> <span class="muted small">수수료 약 ${Math.round(sumFee / 1e4).toLocaleString('ko-KR')}만원 빼고 (한 번 살 때·팔 때 각 ${bt.fee}%), 세금 전</span></p>` : ''}
+      <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="500만원으로 시작해 번 돈까지 다시 넣었다면 번 돈 (누적, 수수료 포함, 세금 전)">500만원 누적</th><th>최근 1년</th><th title="적용하기 전에 ★였던 신호">이전 ★</th></tr></thead><tbody>${out.map(x => x.b
         ? `<tr><td><b>${esc(x.t)}</b></td><td>${esc(x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${won(money(x.b.st))}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
         : `<tr><td><b>${esc(x.t)}</b></td><td colspan="8" class="muted small">${x.err ? '주가를 불러오지 못함' : '기준을 넘는 조합 없음'} · 그대로 둠</td><td class="muted small">${esc(x.before)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="muted small">지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 골랐습니다. 마음에 안 들면 그 종목에서 '손절·익절 풀기'나 '손절·익절 찾기'로 바꾸세요. '500만원씩'은 거래마다 같은 금액(500만원)을 넣었다고 본 금액이고, '누적'은 번 돈을 다시 넣어 불렸다고 본 수익률이라 둘이 다르게 보일 수 있습니다.</p>`);
+      <p class="muted small">지난 차트에 맞춘 값이라 앞으로도 똑같이 맞지는 않습니다. 기간이 3·5년이면 최근 1년도 플러스인 조합을 먼저 골랐습니다. 마음에 안 들면 그 종목에서 '손절·익절 풀기'나 '손절·익절 찾기'로 바꾸세요. '500만원 누적'은 500만원 × 누적 수익률로, 번 돈을 다음 거래에 다시 넣어 굴린 금액입니다.</p>`);
   });
   // "손절·익절 풀기": 이 종목 + 지금 신호의 손절·익절을 지우고, 이 신호가 ★(적용 신호)였으면 그것도 지움
   $('#bt-reset').addEventListener('click', () => {
