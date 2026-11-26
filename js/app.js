@@ -1723,30 +1723,41 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { const o = $('.modal-info.popup[open]'); if (o) o.open = false; } });
   // 🔬 심층 분석 보고서: 요청하면 서버가 Claude 에 맡기고 /d/<id> 주소를 돌려준다. 이 브라우저에 종목별로 지난 보고서 주소를 기억
   const DEEP_KEY = 'dcf-deep';
+  // 프롬프트 글은 창을 펼칠 때 미리 받아 둔다 (누르는 순간 바로 복사되게)
+  const deepPromptCache = {};
+  const deepPrompt = t => (deepPromptCache[t] = deepPromptCache[t] || fetch('/api/kakao?action=deepprompt&ticker=' + encodeURIComponent(t))
+    .then(async res => { const j = await res.json().catch(() => ({})); if (!res.ok) throw new Error(j.error || '프롬프트를 못 받았습니다'); return j.text; })
+    .catch(err => { delete deepPromptCache[t]; throw err; }));
   function renderDeep(t) {
     const body = $('#deep-body'); if (!body) return;
+    if (t) deepPrompt(t).catch(() => {});
     const list = ((lsGet(DEEP_KEY, {}) || {})[t] || []).slice(-5).reverse();
     body.innerHTML = `<div class="deep-ways">
       <div class="deep-way"><b>무료</b> <span class="muted small">내 Claude 구독으로</span>
         <p class="small">프롬프트를 복사하고 claude.ai 를 엽니다. 새 채팅에 붙여 넣기(Ctrl+V)만 하면 됩니다. 추가 비용 없음.</p>
         <button type="button" class="mini" data-deep-copy>📋 ${esc(t || '')} 프롬프트 복사 + Claude 열기</button> <span class="muted small" id="deep-copy-msg"></span></div>
-      <div class="deep-way"><b>자동</b> <span class="muted small">사이트가 대신, 1건 약 1~3달러</span>
-        <p class="small">사이트가 Claude 에 맡기고, 다 되면 보고서 페이지·카톡으로 알려 줍니다.</p>
-        <button type="button" class="mini ghost" data-deep-go>🔬 ${esc(t || '')} 보고서 요청</button> <span class="muted small" id="deep-msg"></span></div>
     </div>` +
-      (list.length ? `<p class="small">이 브라우저에서 요청한 보고서: ${list.map(x => `<a href="${esc(x.path)}" target="_blank" rel="noopener">${esc(String(x.at).slice(0, 10))}</a>`).join(' · ')}</p>` : '');
+      (list.length ? `<p class="small">예전에 사이트로 요청한 보고서: ${list.map(x => `<a href="${esc(x.path)}" target="_blank" rel="noopener">${esc(String(x.at).slice(0, 10))}</a>`).join(' · ')}</p>` : '');
   }
   $('#deep-box').addEventListener('toggle', () => { if ($('#deep-box').open) renderDeep(modalTicker); });
   $('#deep-body').addEventListener('click', async e => {
     if (e.target.closest('[data-deep-copy]')) {
       const t = modalTicker, msg = $('#deep-copy-msg'); if (!t) return;
-      const win = window.open('https://claude.ai/new', '_blank'); if (win) win.opener = null; // 팝업 차단을 피하려고 누르자마자 엽니다
+      // 복사를 먼저 하고(이 창에 포커스가 있어야 복사됨) 그다음 Claude 창을 연다
+      const copy = async text => {
+        try { await navigator.clipboard.writeText(text); return true; } catch (err) {
+          // 예전 방식으로 한 번 더
+          const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e2) { /* 실패 */ }
+          ta.remove(); return ok;
+        }
+      };
       try {
-        const res = await fetch('/api/kakao?action=deepprompt&ticker=' + encodeURIComponent(t));
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || '프롬프트를 못 받았습니다');
-        await navigator.clipboard.writeText(j.text);
-        msg.textContent = win ? '복사했습니다. 열린 Claude 창에 붙여 넣으세요 (Ctrl+V).' : '복사했습니다. claude.ai 를 열어 붙여 넣으세요 (Ctrl+V).';
+        const text = await deepPrompt(t);
+        if (!(await copy(text))) throw new Error('브라우저가 복사를 막았습니다');
+        const win = window.open('https://claude.ai/new', '_blank'); if (win) win.opener = null;
+        msg.innerHTML = win ? '복사했습니다. 열린 Claude 창에 붙여 넣으세요 (Ctrl+V).'
+          : '복사했습니다. <a href="https://claude.ai/new" target="_blank" rel="noopener">Claude 열기</a>를 눌러 붙여 넣으세요 (Ctrl+V).';
       } catch (err) { msg.textContent = '복사 실패: ' + (err.message || err); }
       return;
     }
