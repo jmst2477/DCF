@@ -1,8 +1,8 @@
 // 주식 에이전트 — 국내 주식(코스피 .KS, 코스닥 .KQ). 미국 쪽(api/_agent.js)과 같은 규칙, 따로 저장.
 // 하루 흐름 (한국 시간)
-//   16시대  close 단계 (Vercel Cron, 장 마감 15:30 뒤): 체결 반영 → 신호 계산 → 매수 승인 요청·자동 매수 + 청산 계획 → 카톡
+//   07:50  close 단계 (Vercel Cron, 미국 카톡과 같은 아침): 어제 장 체결 반영 → 어제 종가로 신호 계산 → 매수 승인 요청·자동 매수 + 청산 계획 → 카톡
 //   08:40  open 단계 (Vercel Cron, 장 시작 전 동시호가): 청산 매도(시장가)·익절 대기(지정가) + 승인된 매수(지정가)
-//   승인은 에이전트 화면에서 비밀번호로. 장중(08:30~15:20)에 승인하면 바로 주문, 그 밖이면 다음 08:40 에 보냄. 승인 마감 = 다음 장 날 15시
+//   승인은 에이전트 화면에서 비밀번호로. 장중(08:30~15:20)에 승인하면 바로 주문, 그 밖이면 다음 08:40 에 보냄. 승인 마감 = 그날(주말이면 다음 장 날) 15시
 // 안전장치(미국과 같음): 매수 1건 500만원 고정(내림), 이미 가진·주문 중인 종목은 안 삼, 하루 매수 3건까지(국내 따로),
 //   이번 달 국내 손실이 월초 국내 계좌(예수금 + 국내 보유 평가액)의 -5%를 넘으면 새 국내 매수 멈춤, 에이전트가 산 수량만 판다.
 // 국내 주문은 그날만 유효 (안 채워지면 장 마감에 사라짐). 지정가는 호가 단위에 맞춘다.
@@ -33,6 +33,14 @@ export function krWindow(now) {
   const { m, wd } = kst(now);
   return wd >= 1 && wd <= 5 && m >= 8 * 60 + 30 && m < 15 * 60 + 20 ? "open" : "closed";
 }
+// 국내 '오늘 장': 한국 15:40 전이면 바로 앞 평일 (아침에 돌면 어제 장을 본다). 그날이 휴장이면 일봉 날짜가 안 맞아 새 판단을 안 함
+export function krSession(now) {
+  const k = new Date(now.getTime() + 9 * 3600e3);
+  if (k.getUTCHours() * 60 + k.getUTCMinutes() < 15 * 60 + 40) k.setUTCDate(k.getUTCDate() - 1);
+  while (k.getUTCDay() === 0 || k.getUTCDay() === 6) k.setUTCDate(k.getUTCDate() - 1);
+  return k.toISOString().slice(0, 10);
+}
+const kmd = iso => { const k = new Date(Date.parse(iso) + 9 * 3600e3); return `${k.getUTCMonth() + 1}/${k.getUTCDate()}`; };
 // 승인 마감: 만든 뒤 처음 오는 평일 한국 15:00
 export function krDeadline(now) {
   const k = new Date(now.getTime() + 9 * 3600e3);
@@ -124,7 +132,7 @@ export function makeKrAgent(deps) {
 
   // ---------- 장 마감 뒤 (한국 16시대) ----------
   async function closeStep({ data, origin, force } = {}) {
-    const today = kstDate(now());
+    const today = krSession(now());
     if (!force && (await store.get(KK.closeDone)) === today) return { skipped: "이미 함" };
     const items = plan(data || {}).filter(x => isKR(x.t));
     const posNow = await get(KK.pos, {});
@@ -208,12 +216,12 @@ export function makeKrAgent(deps) {
     if (date === today) await store.set(KK.closeDone, today);
 
     const lines = notes.filter(n => n.includes("안 채워져"));
-    created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 ${won(a.limit)} × ${a.qty}주 → 다음 장 날 08:40 주문\n  원치 않으면 에이전트 화면에서 '취소'`));
+    created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 ${won(a.limit)} × ${a.qty}주 → 장 시작 전 08:40 주문\n  원치 않으면 에이전트 화면에서 '취소'`));
     created.filter(a => !a.auto).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 ${won(a.limit)} × 약 ${a.est}주${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 다음 장 시작에 시장가 매도`));
     if (month.stop) lines.push(`⚠ 이번 달 국내 손익 ${won(month.pnl)} — 새 국내 매수 멈춤`);
-    if (lines.length && send) await sendChunks(send, `🇰🇷 에이전트 ${today} 국내 종가`, lines, created.some(a => a.status === "pending") ? `\n승인 마감: 다음 장 날 15시` : "", origin);
+    if (lines.length && send) await sendChunks(send, `🇰🇷 에이전트 국내 ${today} 종가`, lines, created.some(a => a.status === "pending") ? `\n승인 마감: ${kmd(krDeadline(now()))} 15시 (08:40 전에 승인하면 장 시작에, 그 뒤엔 바로 주문)` : "", origin);
     await log(`🇰🇷 국내 종가 확인 ${today}: 승인 요청 ${created.filter(a => !a.auto).length}, 자동 매수 ${created.filter(a => a.auto).length}, 청산 ${exits.filter(x => !x.price).length}, 익절 대기 ${exits.filter(x => x.price).length}` + (errors.length ? `, 오류 ${errors.length}` : ""));
     return { date: today, created, buys, exits, errors, month, paused };
   }

@@ -28,7 +28,7 @@
     },
     {
       "path": "/api/agent?action=cron&step=krclose",
-      "schedule": "20 7 * * 1-5"
+      "schedule": "50 22 * * 1-5"
     },
     {
       "path": "/api/agent?action=cron&step=kropen",

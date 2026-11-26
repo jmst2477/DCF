@@ -8,9 +8,11 @@ export function reportSummary(r, { newsWarn = 0, picks = 0, url = null } = {}) {
   const lines = [`📊 리서치 ${r.date || ""}`];
   if (o) lines.push(`🧭 종합평가: ${o.level} (${o.score > 0 ? "+" : ""}${o.score})`, o.action);
   if (r.spy) lines.push(`시장: ${r.spy.kind}${r.vix != null ? ` · VIX ${r.vix.toFixed(1)} ${r.vixTxt}` : ""}`);
+  if (r.kr && r.kr.kospi) lines.push(`국내: 코스피 ${r.kr.kospi.kind}${r.kr.kosdaq ? ` · 코스닥 ${r.kr.kosdaq.kind}` : ""}`);
   if (r.strong && r.strong.length) lines.push(`강한 섹터: ${r.strong.map(s => s.ko).join(", ")}`);
   const extra = [];
   if (r.recs && r.recs.length) extra.push(`추천 ${r.recs.map(x => x.t).join("·")}`);
+  if (r.krRecs && r.krRecs.length) extra.push(`국내 추천 ${r.krRecs.map(x => x.t.slice(0, 6)).join("·")}`);
   if (newsWarn) extra.push(`뉴스 주의 ${newsWarn}종목`);
   if (picks) extra.push(`새 후보 ${picks}개`);
   if (extra.length) lines.push(extra.join(" · "));
@@ -47,7 +49,7 @@ footer{font-size:12px;color:var(--mu);margin:16px 4px 32px}
 @media print{body{background:#fff;color:#000}button{display:none}.card{border:1px solid #ddd;break-inside:avoid;background:#fff}.card.top{background:#f3f8ff}main{max-width:none}}
 </style>
 <main>
-<header><div><h1>📊 리서치 보고서</h1><div class="mu">${esc(v.date || "")} 미국 종가 기준${at ? ` · ${esc(at)} 작성` : ""}</div></div><button onclick="window.print()">PDF로 저장</button></header>
+<header><div><h1>📊 리서치 보고서</h1><div class="mu">${esc(v.date || "")} 미국·국내 종가 기준${at ? ` · ${esc(at)} 작성` : ""}</div></div><button onclick="window.print()">PDF로 저장</button></header>
 ${secs.join("\n")}
 <footer>규칙으로 계산한 참고값이며 투자 판단은 본인 몫입니다.${v.errors && v.errors.length ? `<br>못 받은 자료: ${esc(v.errors.slice(0, 6).join(", "))}` : ""}</footer>
 </main></html>`;
