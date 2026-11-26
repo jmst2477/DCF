@@ -323,6 +323,11 @@ body.modal-open { overflow: hidden; }
 .wl-list.only li:not([data-sig="buy"]):not([data-sig="sell"]):not(.wl-sec) { display: none; }
 .modal-info { border-top: 1px solid var(--line); padding: 8px 16px; flex: none; }
 .modal-info[open] { max-height: 42vh; overflow-y: auto; }
+/* 펼치면 새 창처럼: 화면 가운데 큰 창으로 띄우고 뒤는 어둡게. 제목 줄(다시 누르면 닫힘)은 위에 고정 */
+.modal-info.popup[open] { position: fixed; z-index: 30; top: calc(var(--tabs-h, 0px) + 3vh); left: 50%; transform: translateX(-50%); width: min(960px, calc(100vw - 24px)); max-height: calc(100vh - var(--tabs-h, 0px) - 6vh); overflow-y: auto; box-sizing: border-box; padding: 0 20px 16px; background: var(--card); border: 0; border-radius: 16px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45), 0 12px 40px rgba(0,0,0,.3); overscroll-behavior: contain; }
+.modal-info.popup[open] > summary { position: sticky; top: 0; z-index: 2; background: var(--card); padding: 14px 0 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); list-style: none; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.modal-info.popup[open] > summary::-webkit-details-marker { display: none; }
+.modal-info.popup[open] > summary::after { content: '닫기 ✕'; margin-left: auto; font-size: 13px; font-weight: 600; color: var(--sub); background: var(--soft); border-radius: 8px; padding: 3px 10px; }
 .modal-info > summary { font-weight: 600; padding: 4px 0; }
 .modal-info .hint { margin: 8px 0 4px; }
 /* 휴대폰: 신호·지표 버튼은 옆으로 밀어서 보기, 차트 높이 확보 */
