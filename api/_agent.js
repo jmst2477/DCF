@@ -499,7 +499,7 @@ export function makeAgent(deps) {
   }
   async function setPaused(v) { await store.set(K.paused, !!v); await log(v ? "에이전트 멈춤" : "에이전트 다시 켬"); }
 
-  return { closeStep, scanStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log, krClose: kr.closeStep, krOpen: kr.openStep };
+  return { closeStep, scanStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log, krClose: kr.closeStep, krOpen: kr.openStep, krNxt: kr.nxtStep };
 }
 
 // 카톡 한 통 200자 제한

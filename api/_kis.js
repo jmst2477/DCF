@@ -271,7 +271,7 @@ export function makeKis({ fetchImpl = fetch, store, cfg = kisConfig() } = {}) {
       for (let page = 0; page < 10; page++) {
         const { j, more } = await call("GET", "/uapi/domestic-stock/v1/trading/inquire-daily-ccld", "TTTC0081R", {
           ...acct(), INQR_STRT_DT: from, INQR_END_DT: to, SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "01", INQR_DVSN: "00",
-          INQR_DVSN_3: "00", ORD_GNO_BRNO: "", ODNO: "", INQR_DVSN_1: "", CTX_AREA_FK100: fk, CTX_AREA_NK100: nk, EXCG_ID_DVSN_CD: "KRX",
+          INQR_DVSN_3: "00", ORD_GNO_BRNO: "", ODNO: "", INQR_DVSN_1: "", CTX_AREA_FK100: fk, CTX_AREA_NK100: nk, EXCG_ID_DVSN_CD: "ALL", // 한국거래소 + 넥스트레이드
         }, cont);
         (j.output1 || []).forEach(x => out.push({
           key: `${x.ord_dt}-${x.odno}`, no: String(x.odno || ""), date: x.ord_dt, t: String(x.pdno || "").trim(),
@@ -283,20 +283,21 @@ export function makeKis({ fetchImpl = fetch, store, cfg = kisConfig() } = {}) {
       }
       return out.filter(x => x.qty > 0 && x.side);
     },
-    // 주문 (장 시작 전 08:30~ 동시호가, 장중 09:00~15:20). price 0 = 시장가, 아니면 지정가
-    async krOrder(side, code, qty, price) {
+    // 주문. ex = "KRX"(한국거래소: 08:30~ 동시호가, 09:00~15:20) 또는 "NXT"(넥스트레이드 장전 08:00~08:50, 지정가만, 넥스트레이드 거래 종목만)
+    // price 0 = 시장가, 아니면 지정가
+    async krOrder(side, code, qty, price, ex = "KRX") {
       const { j } = await call("POST", "/uapi/domestic-stock/v1/trading/order-cash", side === "buy" ? "TTTC0012U" : "TTTC0011U", {
         ...acct(), PDNO: code, ORD_DVSN: price ? "00" : "01", ORD_QTY: String(qty), ORD_UNPR: price ? String(Math.round(price)) : "0",
-        EXCG_ID_DVSN_CD: "KRX", SLL_TYPE: side === "sell" ? "01" : "", CNDT_PRIC: "",
+        EXCG_ID_DVSN_CD: ex, SLL_TYPE: side === "sell" ? "01" : "", CNDT_PRIC: "",
       });
       const o = j.output || {};
-      return { no: String(o.ODNO || o.odno || ""), org: String(o.KRX_FWDG_ORD_ORGNO || o.krx_fwdg_ord_orgno || "") };
+      return { no: String(o.ODNO || o.odno || ""), org: String(o.KRX_FWDG_ORD_ORGNO || o.krx_fwdg_ord_orgno || ""), ex };
     },
     // 주문 전량 취소
-    async krCancel(org, no) {
+    async krCancel(org, no, ex = "KRX") {
       await call("POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", "TTTC0013U", {
         ...acct(), KRX_FWDG_ORD_ORGNO: org, ORGN_ODNO: no, ORD_DVSN: "00", RVSE_CNCL_DVSN_CD: "02",
-        ORD_QTY: "0", ORD_UNPR: "0", QTY_ALL_ORD_YN: "Y", EXCG_ID_DVSN_CD: "KRX",
+        ORD_QTY: "0", ORD_UNPR: "0", QTY_ALL_ORD_YN: "Y", EXCG_ID_DVSN_CD: ex,
       });
       return { ok: true };
     },

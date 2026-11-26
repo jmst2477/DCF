@@ -1,7 +1,8 @@
 // 주식 에이전트 — 국내 주식(코스피 .KS, 코스닥 .KQ). 미국 쪽(api/_agent.js)과 같은 규칙, 따로 저장.
 // 하루 흐름 (한국 시간)
 //   07:50  close 단계 (Vercel Cron, 미국 카톡과 같은 아침): 어제 장 체결 반영 → 어제 종가로 신호 계산 → 매수 승인 요청·자동 매수 + 청산 계획 → 카톡
-//   08:40  open 단계 (Vercel Cron, 장 시작 전 동시호가): 청산 매도(시장가)·익절 대기(지정가) + 승인된 매수(지정가)
+//   08:01  nxt 단계 (Vercel Cron): 승인된 매수를 넥스트레이드 장전 시장(08:00~08:50)에 지정가로. 넥스트레이드에 없는 종목은 08:40 으로 미룸
+//   08:40  open 단계 (Vercel Cron, 장 시작 전 동시호가): 청산 매도(시장가)·익절 대기(지정가) + 아직 안 나간 승인 매수(지정가)
 //   승인은 에이전트 화면에서 비밀번호로. 장중(08:30~15:20)에 승인하면 바로 주문, 그 밖이면 다음 08:40 에 보냄. 승인 마감 = 그날(주말이면 다음 장 날) 15시
 // 안전장치(미국과 같음): 매수 1건 500만원 고정(내림), 이미 가진·주문 중인 종목은 안 삼, 하루 매수 3건까지(국내 따로),
 //   이번 달 국내 손실이 월초 국내 계좌(예수금 + 국내 보유 평가액)의 -5%를 넘으면 새 국내 매수 멈춤, 에이전트가 산 수량만 판다.
@@ -28,10 +29,11 @@ export const tickUp = p => Math.ceil(p / tick(p) - 1e-9) * tick(p);
 
 // 한국 시간 (분, 요일)
 const kst = now => { const k = new Date(now.getTime() + 9 * 3600e3); return { m: k.getUTCHours() * 60 + k.getUTCMinutes(), wd: k.getUTCDay() }; };
-// 지금 주문이 바로 나가는 시간인가: 평일 08:30 ~ 15:20 (장 전 동시호가 포함)
+// 지금 주문이 바로 나가는 시간인가: 평일 08:30 ~ 15:20 = 한국거래소("open"), 08:00 ~ 08:30 = 넥스트레이드 장전만("nxt")
 export function krWindow(now) {
   const { m, wd } = kst(now);
-  return wd >= 1 && wd <= 5 && m >= 8 * 60 + 30 && m < 15 * 60 + 20 ? "open" : "closed";
+  if (!(wd >= 1 && wd <= 5)) return "closed";
+  return m >= 8 * 60 + 30 && m < 15 * 60 + 20 ? "open" : m >= 8 * 60 && m < 8 * 60 + 30 ? "nxt" : "closed";
 }
 // 국내 '오늘 장': 한국 15:40 전이면 바로 앞 평일 (아침에 돌면 어제 장을 본다). 그날이 휴장이면 일봉 날짜가 안 맞아 새 판단을 안 함
 export function krSession(now) {
@@ -216,22 +218,55 @@ export function makeKrAgent(deps) {
     if (date === today) await store.set(KK.closeDone, today);
 
     const lines = notes.filter(n => n.includes("안 채워져"));
-    created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 ${won(a.limit)} × ${a.qty}주 → 장 시작 전 08:40 주문\n  원치 않으면 에이전트 화면에서 '취소'`));
+    created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 ${won(a.limit)} × ${a.qty}주 → 08:00 장전(넥스트레이드) 주문, 안 되는 종목은 08:40\n  원치 않으면 에이전트 화면에서 '취소'`));
     created.filter(a => !a.auto).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 ${won(a.limit)} × 약 ${a.est}주${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 다음 장 시작에 시장가 매도`));
     if (month.stop) lines.push(`⚠ 이번 달 국내 손익 ${won(month.pnl)} — 새 국내 매수 멈춤`);
-    if (lines.length && send) await sendChunks(send, `🇰🇷 에이전트 국내 ${today} 종가`, lines, created.some(a => a.status === "pending") ? `\n승인 마감: ${kmd(krDeadline(now()))} 15시 (08:40 전에 승인하면 장 시작에, 그 뒤엔 바로 주문)` : "", origin);
+    if (lines.length && send) await sendChunks(send, `🇰🇷 에이전트 국내 ${today} 종가`, lines, created.some(a => a.status === "pending") ? `\n승인 마감: ${kmd(krDeadline(now()))} 15시 (08:00~08:30 승인은 넥스트레이드 장전, 그 뒤엔 바로 주문)` : "", origin);
     await log(`🇰🇷 국내 종가 확인 ${today}: 승인 요청 ${created.filter(a => !a.auto).length}, 자동 매수 ${created.filter(a => a.auto).length}, 청산 ${exits.filter(x => !x.price).length}, 익절 대기 ${exits.filter(x => x.price).length}` + (errors.length ? `, 오류 ${errors.length}` : ""));
     return { date: today, created, buys, exits, errors, month, paused };
   }
 
   async function submit(o) {
-    const r = await kis.krOrder(o.side, code(o.t), o.qty, o.price);
+    const ex = o.ex || "KRX";
+    const r = await kis.krOrder(o.side, code(o.t), o.qty, o.price, ex);
     const orders = await get(KK.orders, []);
-    orders.push({ ...o, no: r.no, org: r.org, day: kstDate(now()), status: "sent", at: now().toISOString() });
+    orders.push({ ...o, ex, no: r.no, org: r.org, day: kstDate(now()), status: "sent", at: now().toISOString() });
     await store.set(KK.orders, orders.slice(-200));
     return r;
+  }
+
+  // ---------- 한국 08:01: 승인된 매수를 넥스트레이드 장전 시장에 ----------
+  // 넥스트레이드 거래 종목이 아니거나 거부되면 그대로 '승인됨'으로 두고 08:40 한국거래소 단계에서 보낸다
+  async function nxtStep({ origin } = {}) {
+    const done = [], later = [];
+    const today = kstDate(now());
+    let open = null;
+    try { open = await kis.krOpen(ymd(today)); } catch { /* 모르면 해 봄 */ }
+    if (open === false) return { done, later, skipped: "국내 휴장" };
+    const appr = await get(K.appr, []);
+    for (const a of appr.filter(a => a.kr && a.status === "approved")) {
+      const r = await tryNxt(a, appr);
+      if (r.ok) done.push(`장전(NXT) 매수 주문 ${a.t} ${a.qty}주 지정가 ${won(a.limit)}`); else later.push(`${a.t}: ${r.why} → 08:40 장 시작에`);
+    }
+    await store.set(K.appr, appr);
+    const msgs = done.concat(later);
+    if (msgs.length && send) await sendChunks(send, `🇰🇷 에이전트 장전 매수 (넥스트레이드 08:00~08:50)`, msgs, "", origin);
+    for (const m of msgs) await log("🇰🇷 " + m);
+    return { done, later };
+  }
+  // 넥스트레이드로 한 번 넣어 봄. 실패해도 주문이 안 들어간 것이라 '승인됨'으로 남김
+  async function tryNxt(a, appr) {
+    a.status = "sending"; await store.set(K.appr, appr);
+    try {
+      await submit({ side: "buy", t: a.t, qty: a.qty, price: a.limit, sig: a.sig, sid: a.sid, rule: a.rule, why: "승인", ex: "NXT" });
+      a.status = "sent"; a.ex = "NXT";
+      return { ok: true };
+    } catch (e) {
+      a.status = "approved"; a.nxtErr = String(e.message || e).slice(0, 120);
+      return { ok: false, why: /종목|대상|거래불가|NXT|넥스트/.test(a.nxtErr) ? "넥스트레이드 거래 종목 아님" : `장전 주문 실패(${a.nxtErr})` };
+    }
   }
 
   // ---------- 한국 08:40: 청산 + 승인된 매수 ----------
@@ -290,16 +325,20 @@ export function makeKrAgent(deps) {
     const bp = await kis.krBuyingPower(code(a.t), a.limit);
     if (cost > bp.cash) throw new Error(`주문 가능 원화가 부족합니다 (필요 ${won(cost)}, 가능 ${won(bp.cash)}).`);
     a.qty = qty; a.approvedAt = t.toISOString();
-    let now0 = krWindow(t) === "open";
+    const win = krWindow(t);
+    let now0 = win === "open" || win === "nxt";
     if (now0) { try { if ((await kis.krOpen(ymd(kstDate(t)))) === false) now0 = false; } catch { /* 모르면 보냄 */ } }
-    if (now0) {
+    if (now0 && win === "nxt") {
+      const r = await tryNxt(a, appr);
+      if (!r.ok) a.note = `${r.why} → 08:40 장 시작에 주문`;
+    } else if (now0) {
       a.status = "sending"; await store.set(K.appr, appr);
       try { await submit({ side: "buy", t: a.t, qty, price: a.limit, sig: a.sig, sid: a.sid, rule: a.rule, why: "승인" }); a.status = "sent"; }
       catch (e) { a.status = "failed"; a.error = String(e.message || e); await store.set(K.appr, appr); throw e; }
     } else a.status = "approved";
     await store.set(K.appr, appr);
-    await log(`🇰🇷 매수 승인 ${a.t} ${qty}주 지정가 ${won(a.limit)} (약 ${man(cost)})${a.status === "sent" ? " → 주문 보냄" : " → 다음 장 날 08:40 에 보냄"}`);
-    return { status: a.status, qty, cost, krw: cost, kr: true, note: a.note || null };
+    await log(`🇰🇷 매수 승인 ${a.t} ${qty}주 지정가 ${won(a.limit)} (약 ${man(cost)})${a.status === "sent" ? (a.ex === "NXT" ? " → 넥스트레이드 장전 주문 보냄" : " → 주문 보냄") : " → 08:40 에 보냄"}`);
+    return { status: a.status, qty, cost, krw: cost, kr: true, ex: a.ex || null, note: a.note || null };
   }
 
   // 에이전트가 넣은 국내 주문 취소
@@ -307,7 +346,7 @@ export function makeKrAgent(deps) {
     const orders = await get(KK.orders, []);
     const o = orders.find(x => x.no && x.no === no && (x.status === "sent" || x.status === "partial"));
     if (!o) return null;
-    await kis.krCancel(o.org, o.no);
+    await kis.krCancel(o.org, o.no, o.ex || "KRX");
     o.status = "canceled";
     await store.set(KK.orders, orders);
     if (o.side === "buy") {
@@ -326,5 +365,5 @@ export function makeKrAgent(deps) {
     };
   }
 
-  return { closeStep, openStep, approve, cancel, status, reconcile };
+  return { closeStep, openStep, nxtStep, approve, cancel, status, reconcile };
 }
