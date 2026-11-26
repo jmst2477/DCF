@@ -48,6 +48,11 @@ export const SYSTEM = `당신은 월스트리트 선임 애널리스트입니다
 - 보고서 본문만 출력합니다 (앞뒤 인사말, 작업 과정 설명 없이).
 - 이 보고서는 개인 투자자가 참고용으로 읽습니다. 맨 끝에 '투자 판단과 책임은 본인에게 있습니다'를 한 줄 넣습니다.`;
 
+// 무료로 쓰기: 내 Claude 구독(claude.ai) 채팅창에 붙여 넣을 한 덩어리 글
+export function deepPromptText(t, today) {
+  return `${SYSTEM}\n\n---\n종목: ${t}\n오늘 날짜: ${today}\n\n위 순서와 형식대로 이 종목의 종합 기업분석 보고서를 써 주세요. 웹 검색으로 최신 자료를 찾아 주세요. 길면 잘릴 수 있으니 결과는 PDF 나 Word(docx) 파일로 주세요.`;
+}
+
 export function deepParams(t, { today, name } = {}) {
   return {
     model: DEEP_MODEL,
