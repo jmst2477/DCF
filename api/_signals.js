@@ -65,6 +65,11 @@ export function tradeStats(d, sim, years) {
 }
 
 // 사이트 백테스트 수수료 설정 (dcf-backtest.fee, % 한쪽). 기본 0.25% (신한 해외 온라인)
+// 국내 주식 수수료 (사이트 '국내' 칸, 살 때·팔 때 각각). 기본 0.12%
+export function feeKrOf(data) {
+  const b = obj(data && data["dcf-backtest"]);
+  return typeof b.feeKr === "number" && b.feeKr >= 0 && b.feeKr <= 3 ? b.feeKr / 100 : 0.0012;
+}
 export function feeOf(data) {
   const b = obj(data && data["dcf-backtest"]);
   return typeof b.fee === "number" && b.fee >= 0 && b.fee <= 3 ? b.fee / 100 : 0.0025;

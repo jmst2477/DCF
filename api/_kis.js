@@ -1,4 +1,6 @@
-// 한국투자증권(KIS) Open API — 미국 주식 주문·조회만 쓴다. (한투 Open API에는 출금 기능이 없다)
+// 한국투자증권(KIS) Open API — 미국 주식, 국내 주식(코스피·코스닥) 주문·조회만 쓴다. (한투 Open API에는 출금 기능이 없다)
+// 국내 주식 TR·필드는 한투 공식 예제 examples_llm/domestic_stock (order_cash, inquire_balance, inquire_psbl_order,
+// inquire_daily_ccld, order_rvsecncl, chk_holiday) 를 따랐다 (2026-11-27 확인).
 // Vercel 환경 변수: KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT(예: 12345678-01) (2026-11-20 등록)
 // 접근 토큰은 하루짜리이고 1분에 한 번만 새로 받을 수 있어 서버 저장소(Redis)에 보관해 같이 쓴다.
 // 필드 이름은 한투 공식 예제(github.com/koreainvestment/open-trading-api, examples_llm/overseas_stock)를 따랐다.
@@ -237,6 +239,72 @@ export function makeKis({ fetchImpl = fetch, store, cfg = kisConfig() } = {}) {
         t: String(x.symb).trim(), excd: x.excd || excd, name: x.name || x.ename || "", price: num(x.last), capK: num(x.valx), vol: num(x.tvol),
         per: num(x.per), eps: num(x.eps), rate: num(x.rate), tradable: x.e_ordyn !== "N" && x.e_ordyn !== "X",
       }));
+    },
+    // ---------- 국내 주식 (종목코드 6자리, 원화) ----------
+    // 잔고 + 예수금
+    async krBalance() {
+      const { j } = await call("GET", "/uapi/domestic-stock/v1/trading/inquire-balance", "TTTC8434R", {
+        ...acct(), AFHR_FLPR_YN: "N", OFL_YN: "", INQR_DVSN: "02", UNPR_DVSN: "01", FUND_STTL_ICLD_YN: "N",
+        FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00", CTX_AREA_FK100: "", CTX_AREA_NK100: "",
+      });
+      const o2 = (j.output2 || [])[0] || {};
+      return {
+        rows: (j.output1 || []).map(x => ({
+          t: String(x.pdno || "").trim(), name: x.prdt_name || "", qty: num(x.hldg_qty), sellable: num(x.ord_psbl_qty),
+          avg: num(x.pchs_avg_pric), price: num(x.prpr), value: num(x.evlu_amt),
+        })).filter(x => x.t && x.qty > 0),
+        cash: num(o2.dnca_tot_amt), total: num(o2.tot_evlu_amt),
+      };
+    },
+    // 미수 없이 살 수 있는 금액·수량 (지정가 기준)
+    async krBuyingPower(code, price) {
+      const { j } = await call("GET", "/uapi/domestic-stock/v1/trading/inquire-psbl-order", "TTTC8908R", {
+        ...acct(), PDNO: code, ORD_UNPR: String(Math.round(price)), ORD_DVSN: "00", CMA_EVLU_AMT_ICLD_YN: "N", OVRS_ICLD_YN: "N",
+      });
+      const o = j.output || {};
+      return { cash: num(o.nrcvb_buy_amt) || num(o.ord_psbl_cash), maxQty: num(o.nrcvb_buy_qty) || num(o.max_buy_qty) };
+    },
+    // 체결 내역 (3개월 안, 날짜 YYYYMMDD)
+    async krFills(from, to) {
+      const out = [];
+      let fk = "", nk = "", cont = "";
+      for (let page = 0; page < 10; page++) {
+        const { j, more } = await call("GET", "/uapi/domestic-stock/v1/trading/inquire-daily-ccld", "TTTC0081R", {
+          ...acct(), INQR_STRT_DT: from, INQR_END_DT: to, SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "01", INQR_DVSN: "00",
+          INQR_DVSN_3: "00", ORD_GNO_BRNO: "", ODNO: "", INQR_DVSN_1: "", CTX_AREA_FK100: fk, CTX_AREA_NK100: nk, EXCG_ID_DVSN_CD: "KRX",
+        }, cont);
+        (j.output1 || []).forEach(x => out.push({
+          key: `${x.ord_dt}-${x.odno}`, no: String(x.odno || ""), date: x.ord_dt, t: String(x.pdno || "").trim(),
+          side: x.sll_buy_dvsn_cd === "02" ? "buy" : x.sll_buy_dvsn_cd === "01" ? "sell" : "",
+          qty: num(x.tot_ccld_qty), price: num(x.avg_prvs),
+        }));
+        if (!more || !j.ctx_area_nk100) break;
+        fk = j.ctx_area_fk100; nk = j.ctx_area_nk100; cont = "N";
+      }
+      return out.filter(x => x.qty > 0 && x.side);
+    },
+    // 주문 (장 시작 전 08:30~ 동시호가, 장중 09:00~15:20). price 0 = 시장가, 아니면 지정가
+    async krOrder(side, code, qty, price) {
+      const { j } = await call("POST", "/uapi/domestic-stock/v1/trading/order-cash", side === "buy" ? "TTTC0012U" : "TTTC0011U", {
+        ...acct(), PDNO: code, ORD_DVSN: price ? "00" : "01", ORD_QTY: String(qty), ORD_UNPR: price ? String(Math.round(price)) : "0",
+        EXCG_ID_DVSN_CD: "KRX", SLL_TYPE: side === "sell" ? "01" : "", CNDT_PRIC: "",
+      });
+      const o = j.output || {};
+      return { no: String(o.ODNO || o.odno || ""), org: String(o.KRX_FWDG_ORD_ORGNO || o.krx_fwdg_ord_orgno || "") };
+    },
+    // 주문 전량 취소
+    async krCancel(org, no) {
+      await call("POST", "/uapi/domestic-stock/v1/trading/order-rvsecncl", "TTTC0013U", {
+        ...acct(), KRX_FWDG_ORD_ORGNO: org, ORGN_ODNO: no, ORD_DVSN: "00", RVSE_CNCL_DVSN_CD: "02",
+        ORD_QTY: "0", ORD_UNPR: "0", QTY_ALL_ORD_YN: "Y", EXCG_ID_DVSN_CD: "KRX",
+      });
+      return { ok: true };
+    },
+    // 그날 국내 장이 열리는지 (YYYYMMDD). 모르면 null
+    async krOpen(ymd8) {
+      const { j } = await call("GET", "/uapi/domestic-stock/v1/quotations/chk-holiday", "CTCA0903R", { BASS_DT: ymd8, CTX_AREA_FK: "", CTX_AREA_NK: "" });
+      const r = (j.output || []).find(x => x.bass_dt === ymd8);
+      return r ? r.opnd_yn === "Y" : null;
     },
   };
 }
