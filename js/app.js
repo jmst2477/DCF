@@ -323,7 +323,7 @@
     if (!krList) return [];
     const k = krNorm(q);
     if (!k) return [];
-    const rank = x => (x.k === k ? 0 : x.k.startsWith(k) ? 1 : x.k.includes(k) ? 2 : 9);
+    const rank = x => (x.k === k || x.c === k ? 0 : x.k.startsWith(k) || (/^\d+$/.test(k) && x.c.startsWith(k)) ? 1 : x.k.includes(k) ? 2 : 9);
     return krList.map(x => ({ x, r: rank(x) })).filter(y => y.r < 9).sort((a, b) => a.r - b.r || a.x.n.length - b.x.n.length).slice(0, max).map(y => y.x);
   }
   const krT = x => `${x.c}.${x.m}`;
@@ -1983,10 +1983,19 @@
     else if (!$('#chart-modal').hidden) closeModal();
     window.scrollTo(0, 0);
   });
+  // 찾을 시장: 해외(미국 티커) / 국내(한글·영문 이름, 코드). 국내면 'SK'도 국내 종목 이름으로 찾음. 이 브라우저에 기억
+  const wlSrc = () => $('#wl-src').value;
+  function setSrc(v) {
+    $('#wl-src').value = v === 'kr' ? 'kr' : 'us';
+    lsSet('dcf-wl-src', $('#wl-src').value);
+    $('#wl-input').placeholder = wlSrc() === 'kr' ? '예: SK하이닉스, 삼성전자, 005930' : '예: GEV, AAPL (국내는 왼쪽에서 국내 선택)';
+    $('#wl-input').dispatchEvent(new Event('input'));
+  }
+  $('#wl-src').addEventListener('change', () => setSrc(wlSrc()));
   $('#wl-input').addEventListener('input', () => {
     const v = $('#wl-input').value, dl = $('#wl-dl');
     const last = v.split(',').pop().trim();
-    if (!dl || !/[가-힣]/.test(last)) { if (dl) dl.innerHTML = ''; return; }
+    if (!dl || !last || !(wlSrc() === 'kr' || /[가-힣]/.test(last))) { if (dl) dl.innerHTML = ''; return; }
     loadKr().then(() => {
       const head = v.slice(0, v.length - v.split(',').pop().length);
       dl.innerHTML = krFind(last, 12).map(x => `<option value="${esc(head + x.n)}">${esc(x.c)} ${x.m === 'KS' ? '코스피' : '코스닥'}</option>`).join('');
@@ -1994,23 +2003,27 @@
   });
   // 관심종목에 국내 종목이 있으면 한글 이름을 받아 다시 그림
   if (watch.some(isKR)) loadKr().then(() => { if (!$('#chart-modal').hidden) renderWatch(); }).catch(() => {});
+  setSrc(lsGet('dcf-wl-src', 'us'));
   $('#wl-form').addEventListener('submit', async e => {
     e.preventDefault();
     // 리포트 종목을 한 번에: "GEV BE CEG" 처럼 띄어 쓰거나 쉼표로 여러 개
     const input = $('#wl-input').value.trim(), hold = $('#wl-kind').value === 'hold';
     const msg = $('#wl-msg');
     // 한글 이름: 쉼표로 나눈 칸이 이름과 딱 맞으면 그대로 (예: "KODEX 200"), 아니면 띄어쓰기로 나눠 하나씩
-    const hasKo = /[가-힣]/.test(input);
+    const kr = wlSrc() === 'kr', hasKo = kr || /[가-힣]/.test(input);
     if (hasKo) { try { await loadKr(); } catch (err) { if (msg) msg.textContent = '국내 종목 목록을 못 받았습니다. 6자리 종목코드로 넣어 주세요.'; return; } }
     const raw = [];
     input.split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
       const exact = hasKo && krList && krList.find(x => x.k === krNorm(part));
-      if (exact) raw.push(krT(exact)); else part.split(/\s+/).filter(Boolean).forEach(w => raw.push(w));
+      if (exact) raw.push(krT(exact));
+      else if (kr && !/^\d{6}$/.test(part) && part.split(/\s+/).length > 1 && krFind(part)[0]) raw.push('@' + part); // 국내: 띄어 쓴 이름 통째로
+      else part.split(/\s+/).filter(Boolean).forEach(w => raw.push(kr && !/^\d{6}$/.test(w) ? '@' + w : w));
     });
     const miss = [];
     // 국내 주식: 6자리 종목코드(예: 005930)면 코스피·코스닥 중 어디인지 찾아 005930.KS 처럼 붙임
     const ts = await Promise.all(raw.map(async t => {
-      if (/[가-힣]/.test(t)) { const f = krFind(t)[0]; if (!f) miss.push(t); return f ? krT(f) : null; }
+      // '@' = 국내에서 이름으로 찾기 (국내 선택 시 영문도. 예: SK → SK하이닉스 …)
+      if (t[0] === '@' || /[가-힣]/.test(t)) { t = t.replace(/^@/, ''); const f = krFind(t)[0]; if (!f) miss.push(t); return f ? krT(f) : null; }
       t = t.toUpperCase();
       if (!/^\d{6}$/.test(t)) return t;
       if (krByCode[t]) return krT(krByCode[t]);
@@ -2020,7 +2033,7 @@
         return j.ticker;
       } catch (err) { if (msg) msg.textContent = String(err.message || err); return null; }
     }));
-    if (miss.length && msg) msg.textContent = `'${miss.join("', '")}' 종목을 찾지 못했습니다.`;
+    if (miss.length && msg) msg.textContent = `'${miss.join("', '")}' 종목을 ${kr ? '국내에서' : ''} 찾지 못했습니다.${kr ? ' 미국 종목이면 왼쪽에서 해외를 고르세요.' : ''}`;
     const ok = ts.filter(Boolean).filter(t => addWatch(t, hold));
     if (!ok.length) return;
     if (msg && ok.length === ts.length) msg.textContent = '';
@@ -2049,6 +2062,7 @@
     const b = e.target.closest('[data-mkt-pick]');
     if (!b) return;
     mktPick = b.dataset.mktPick;
+    if (mktPick) setSrc(mktPick);
     lsSet('dcf-wl-mkt', mktPick);
     renderWatch();
   });
