@@ -10,6 +10,7 @@
 //   GET ?action=cron&step=scan   → 나스닥100·S&P 상위 50 중 관심 목록 밖 매수 신호 → 승인 요청 (Vercel Cron, 한국 08시대)
 //   GET ?action=cron&step=open   → 예약 주문 (Vercel Cron, 한국 11시대)
 //   GET ?action=cron&step=krclose → 국내 어제 종가 확인 (Vercel Cron, 한국 07:50 아침)
+//   GET ?action=cron&step=krnxt   → 승인된 국내 매수를 넥스트레이드 장전 시장에 (Vercel Cron, 한국 08:01)
 //   GET ?action=cron&step=kropen  → 국내 주문 (Vercel Cron, 한국 08:40 장 전 동시호가)
 //   POST { action, password, id? }  action = status | approve | reject | pause | resume | close(지금 종가 확인)
 
@@ -82,12 +83,12 @@ export default async function handler(req, res) {
       if (!ready) return res.status(200).json({ skipped: "not configured" });
       const A = agent(req);
       try {
-        const r = q.step === "krclose" ? await A.krClose({ data: await syncData(), origin: originOf(req) }) : q.step === "kropen" ? await A.krOpen({ origin: originOf(req) })
+        const r = q.step === "krclose" ? await A.krClose({ data: await syncData(), origin: originOf(req) }) : q.step === "kropen" ? await A.krOpen({ origin: originOf(req) }) : q.step === "krnxt" ? await A.krNxt({ origin: originOf(req) })
           : q.step === "open" ? await A.openStep({ origin: originOf(req) }) : q.step === "scan" ? await A.scanStep({ data: await syncData(), origin: originOf(req) }) : await A.closeStep({ data: await syncData(), origin: originOf(req) });
         return res.status(200).json({ ok: true, created: r.created && r.created.length, done: r.done, errors: r.errors, skipped: r.skipped });
       } catch (e) {
         // 한투 접속 실패 등: 기록 남기고 카톡으로 알림
-        const m = `⚠ 에이전트 ${{ open: "예약 주문", scan: "큰 종목 찾기", krclose: "국내 종가 확인", kropen: "국내 주문" }[q.step] || "종가 확인"} 실패: ${String((e && e.message) || e)}`;
+        const m = `⚠ 에이전트 ${{ open: "예약 주문", scan: "큰 종목 찾기", krclose: "국내 종가 확인", kropen: "국내 주문", krnxt: "국내 장전 매수" }[q.step] || "종가 확인"} 실패: ${String((e && e.message) || e)}`;
         await A.note(m).catch(() => {});
         await sendMemo(m, originOf(req) + "/api/agent").catch(() => {});
         throw e;
@@ -160,7 +161,7 @@ const t2=s=>new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numeric',ho
 function render(s){
   const L0=s.limits;
   const ap=s.appr||[];
-  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> '+(a.kr?'<span class="tag">🇰🇷 국내</span> ':'')+(a.auto?'<span class="tag">🤖 자동</span> ':'')+(a.outside?'<span class="tag">관심 목록 밖</span> ':'')+'<span class="mu">'+esc(a.name)+'</span>'+(a.stat?'<div class="mu">5년 승률 '+Math.round(a.stat.rate*100)+'% ('+a.stat.n+'번)'+(a.stat.y1!=null?' · 최근 1년 '+(a.stat.y1>0?'+':'')+Math.round(a.stat.y1*100)+'%':'')+'</div>':'')+'<div class="mu">'+esc(a.sig)+' 종가 '+pr(a,a.close)+' → 지정가 '+pr(a,a.limit)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(a.kr&&a.status==='approved'?'승인됨 · 다음 장 08:40 주문':ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'">승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':a.status==='approved'?'<div class="btns"><button class="ghost" data-no="'+a.id+'" data-ask="1">취소</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
+  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> '+(a.kr?'<span class="tag">🇰🇷 국내</span> ':'')+(a.auto?'<span class="tag">🤖 자동</span> ':'')+(a.outside?'<span class="tag">관심 목록 밖</span> ':'')+'<span class="mu">'+esc(a.name)+'</span>'+(a.stat?'<div class="mu">5년 승률 '+Math.round(a.stat.rate*100)+'% ('+a.stat.n+'번)'+(a.stat.y1!=null?' · 최근 1년 '+(a.stat.y1>0?'+':'')+Math.round(a.stat.y1*100)+'%':'')+'</div>':'')+'<div class="mu">'+esc(a.sig)+' 종가 '+pr(a,a.close)+' → 지정가 '+pr(a,a.limit)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(a.kr&&a.status==='approved'?'승인됨 · 08:00 장전 또는 08:40 주문':a.kr&&a.status==='sent'&&a.ex==='NXT'?'넥스트레이드 장전 주문 보냄':ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'">승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':a.status==='approved'?'<div class="btns"><button class="ghost" data-no="'+a.id+'" data-ask="1">취소</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
   const ps=Object.entries(s.pos||{});
   $('#pos').innerHTML=ps.length?ps.map(([t,p])=>'<div class="row"><div><b>'+esc(t)+'</b> '+p.qty+'주 · 평균 $'+p.avg.toFixed(2)+'<div class="mu">'+esc(p.since)+'부터'+(p.rule&&(p.rule.sl||p.rule.tp)?' · 손절 '+(p.rule.sl||'-')+'% 익절 '+(p.rule.tp||'-')+'%':'')+'</div></div></div>').join(''):'<p class="mu">없습니다. (직접 산 주식은 건드리지 않습니다)</p>';
   // 국내 (원화)
@@ -189,7 +190,7 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b||!PW)return;
   const msg=$('#amsg');
   try{
-    if(b.dataset.ok){if(!confirm('실제 돈으로 매수 주문을 넣습니다. 승인할까요?'))return;b.disabled=true;const r=await call('approve',{id:b.dataset.ok});alert(r.kr?r.qty+'주 · '+won(r.cost)+' '+(r.status==='sent'?'주문을 보냈습니다.':'승인했습니다. 다음 장 날 08:40 에 주문합니다.'):r.qty+'주 · $'+r.cost+' (약 '+Math.round(r.krw/1e4)+'만원) '+(r.status==='sent'?'예약 주문을 보냈습니다. 오늘 밤 장 시작에 나갑니다.':r.note?'승인했습니다. '+r.note:'승인했습니다. 오전 10시 이후에 예약 주문을 보냅니다.'))}
+    if(b.dataset.ok){if(!confirm('실제 돈으로 매수 주문을 넣습니다. 승인할까요?'))return;b.disabled=true;const r=await call('approve',{id:b.dataset.ok});alert(r.kr?r.qty+'주 · '+won(r.cost)+' '+(r.status==='sent'?'주문을 보냈습니다.':'승인했습니다. '+(r.note||'08:00 장전(넥스트레이드), 안 되면 08:40 에 주문합니다.')):r.qty+'주 · $'+r.cost+' (약 '+Math.round(r.krw/1e4)+'만원) '+(r.status==='sent'?'예약 주문을 보냈습니다. 오늘 밤 장 시작에 나갑니다.':r.note?'승인했습니다. '+r.note:'승인했습니다. 오전 10시 이후에 예약 주문을 보냅니다.'))}
     else if(b.dataset.no){if(b.dataset.ask&&!confirm('주문 전에 이 매수를 취소할까요?'))return;b.disabled=true;await call('reject',{id:b.dataset.no})}
     else if(b.dataset.cancel){if(!confirm('이 예약 주문을 취소할까요?'))return;b.disabled=true;await call('cancel',{no:b.dataset.cancel})}
     else if(b.id==='pause'){render(await call($('#pause').textContent.includes('멈추')?'pause':'resume'));return}

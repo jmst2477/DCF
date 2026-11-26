@@ -31,6 +31,10 @@
       "schedule": "50 22 * * 1-5"
     },
     {
+      "path": "/api/agent?action=cron&step=krnxt",
+      "schedule": "1 23 * * 0-4"
+    },
+    {
       "path": "/api/agent?action=cron&step=kropen",
       "schedule": "40 23 * * 0-4"
     },
