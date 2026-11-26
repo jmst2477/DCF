@@ -1618,15 +1618,27 @@
   let themeFold = lsGet('dcf-theme-fold', true) !== false;
   const saveThemes = () => lsSet(THEME_KEY, themes);
   if (watch.filter(t => autoTheme(t)).length) saveThemes();
-  const themeList = () => [...new Set(watch.map(t => themes[t]).filter(Boolean))];
-  const shown = t => !themePick || themes[t] === themePick;
+  // 해외·국내 나눠 보기 ('' = 전체, us = 해외, kr = 국내). 이 브라우저에 기억
+  let mktPick = lsGet('dcf-wl-mkt', '');
+  const inMkt = t => !mktPick || (mktPick === 'kr') === isKR(t);
+  const mktWatch = () => watch.filter(inMkt);
+  function renderMkt() {
+    const box = $('#wl-mkt'), kr = watch.filter(isKR).length;
+    if (!kr && mktPick) { mktPick = ''; lsSet('dcf-wl-mkt', ''); }
+    box.hidden = !kr;
+    box.innerHTML = `<span class="muted">시장</span>` + [['', '전체', watch.length], ['us', '🇺🇸 해외', watch.length - kr], ['kr', '🇰🇷 국내', kr]]
+      .map(([v, label, n]) => `<button type="button" class="chip ${v === mktPick ? 'on' : ''}" data-mkt-pick="${v}">${label} <span class="muted">${n}</span></button>`).join('');
+  }
+  const themeList = () => [...new Set(mktWatch().map(t => themes[t]).filter(Boolean))];
+  const shown = t => inMkt(t) && (!themePick || themes[t] === themePick);
   function renderThemes() {
+    renderMkt();
     const box = $('#wl-themes'), list = themeList();
     if (themePick && !list.includes(themePick)) { themePick = ''; lsSet(THEME_PICK_KEY, ''); }
     box.hidden = !list.length;
     const order = themeFold && themePick ? [themePick, ...list.filter(x => x !== themePick)] : list;
     box.classList.toggle('fold', themeFold);
-    box.innerHTML = `<div class="wl-themes-row">${[['', '전체', watch.length], ...order.map(x => [x, x, watch.filter(t => themes[t] === x).length])]
+    box.innerHTML = `<div class="wl-themes-row">${[['', '전체', mktWatch().length], ...order.map(x => [x, x, mktWatch().filter(t => themes[t] === x).length])]
       .map(([v, label, n]) => `<button type="button" class="chip ${v === themePick ? 'on' : ''}" data-theme-pick="${esc(v)}">${esc(label)} <span class="muted">${n}</span></button>`).join('')}</div>`
       + `<button type="button" class="ghost mini wl-themes-fold" title="${themeFold ? '테마를 모두 펼쳐 봅니다' : '테마 칸을 한 줄로 줄입니다 (옆으로 끌거나 밀어서 보기)'}">${themeFold ? '펼치기 ▾' : '접기 ▴'}</button>`;
     box.querySelector('.wl-themes-fold').hidden = list.length < 3;
@@ -2033,6 +2045,13 @@
   // 두 칸은 하나만 켬
   $('#wl-only').addEventListener('change', () => { if ($('#wl-only').checked) $('#wl-ext-only').checked = false; updateOnly(); });
   $('#wl-ext-only').addEventListener('change', () => { if ($('#wl-ext-only').checked) $('#wl-only').checked = false; updateOnly(); });
+  $('#wl-mkt').addEventListener('click', e => {
+    const b = e.target.closest('[data-mkt-pick]');
+    if (!b) return;
+    mktPick = b.dataset.mktPick;
+    lsSet('dcf-wl-mkt', mktPick);
+    renderWatch();
+  });
   $('#wl-mode').addEventListener('click', e => {
     const b = e.target.closest('[data-wl-mode]');
     if (!b || b.dataset.wlMode === wlMode) return;
