@@ -27,6 +27,14 @@
       "schedule": "0 2 * * 1-5"
     },
     {
+      "path": "/api/agent?action=cron&step=krclose",
+      "schedule": "20 7 * * 1-5"
+    },
+    {
+      "path": "/api/agent?action=cron&step=kropen",
+      "schedule": "40 23 * * 0-4"
+    },
+    {
       "path": "/api/kakao?action=report",
       "schedule": "0 23 * * *"
     },
