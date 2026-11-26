@@ -15,6 +15,7 @@ const sma = (a, n, i = a.length - 1) => (i + 1 < n ? null : a.slice(i + 1 - n, i
 const ret = (a, n) => (a.length > n ? a[a.length - 1] / a[a.length - 1 - n] - 1 : null);
 const pct = (v, d = 1) => (v == null ? "-" : (v >= 0 ? "+" : "") + (v * 100).toFixed(d) + "%");
 const last = a => a[a.length - 1];
+const isKRt = t => /\.(KS|KQ)$/i.test(String(t || ""));
 
 // 시장 국면: S&P500(SPY) 200일선 위·아래, 50일선과 200일선 순서, 200일선 기울기(한 달 전보다)
 export function regimeOf(d) {
@@ -62,12 +63,19 @@ export async function makeReport(deps, { data = {}, pos = {} } = {}) {
   const { bars, fred, profile, strategies, plan, TA } = deps;
   const errors = [];
   const got = {};
-  const tick = ["SPY", "QQQ", "^VIX", "^TNX", "^IRX", "DX-Y.NYB", ...SECTORS.map(s => s[0])];
+  const tick = ["SPY", "QQQ", "^VIX", "^TNX", "^IRX", "DX-Y.NYB", "^KS11", "^KQ11", "KRW=X", ...SECTORS.map(s => s[0])];
   (await pool(tick, 6, t => bars(t, "2y"))).forEach((d, i) => { if (d && d.close) got[tick[i]] = d; else errors.push(`${tick[i]}: ${d && d.error}`); });
 
   // 1) 시장 국면
   const spy = got.SPY && regimeOf(got.SPY), qqq = got.QQQ && regimeOf(got.QQQ);
   const vix = got["^VIX"] ? last(got["^VIX"].close) : null;
+  // 국내 시장: 코스피·코스닥 국면, 원/달러
+  const kr = {
+    kospi: got["^KS11"] ? regimeOf(got["^KS11"]) : null, kosdaq: got["^KQ11"] ? regimeOf(got["^KQ11"]) : null,
+    kospiLast: got["^KS11"] ? last(got["^KS11"].close) : null, date: got["^KS11"] ? last(got["^KS11"].time) : null,
+    fx: got["KRW=X"] ? last(got["KRW=X"].close) : null, fx1: got["KRW=X"] ? ret(got["KRW=X"].close, 21) : null,
+  };
+  const ks3 = got["^KS11"] ? ret(got["^KS11"].close, 63) : 0;
   const vixTxt = vix == null ? "" : vix < 15 ? "안정" : vix < 20 ? "보통" : vix < 30 ? "불안" : "공포";
   const date = got.SPY ? last(got.SPY.time) : null;
 
@@ -117,9 +125,10 @@ export async function makeReport(deps, { data = {}, pos = {} } = {}) {
     let pf = null;
     try { pf = await profile(t); } catch { /* 업종 모르면 섹터 점수 없이 */ }
     const c = d.close, s200 = sma(c, 200);
-    const rs3 = ret(c, 63) - spy3;
+    const kr = isKRt(t); // 국내 종목은 코스피와 비교하고, 미국 섹터 순위는 안 씀
+    const rs3 = ret(c, 63) - (kr ? ks3 : spy3);
     const sec = pf && pf.profile && pf.profile.sector;
-    const secRank = sec != null && rank[sec] != null ? rank[sec] : null;
+    const secRank = !kr && sec != null && rank[sec] != null ? rank[sec] : null;
     // 추천 점수: 200일선 위 + 3개월 상대강도 + 강한 섹터 가산
     const score = (last(c) > s200 ? 1 : -1) * 10 + rs3 * 100 + (secRank != null && secRank < 3 ? 8 : secRank != null && secRank >= sectors.length - 2 ? -5 : 0);
     const recent = { time: d.time.slice(-504), open: d.open.slice(-504), high: d.high.slice(-504), low: d.low.slice(-504), close: c.slice(-504), volume: d.volume.slice(-504) };
@@ -129,11 +138,12 @@ export async function makeReport(deps, { data = {}, pos = {} } = {}) {
     const cur = st ? fits.find(f => f.id === st.strat.id) : null;
     const best = fits[0] || null;
     const ed = pf && pf.earnings && pf.earnings.date;
-    return { t, sec, secKo: (SECTORS.find(s => s[2] === sec) || [])[1] || null, above: last(c) > s200, rs3, score, star: st ? st.strat.name : null,
+    return { t, kr, sec, secKo: (SECTORS.find(s => s[2] === sec) || [])[1] || null, above: last(c) > s200, rs3, score, star: st ? st.strat.name : null,
       cur, best, better: !!(best && cur && best.id !== cur.id && best.ret - cur.ret > 0.15), held: !!pos[t], earnings: ed || null };
   })).filter(r => r && !r.error);
   // 옵션(풋·콜 비율, 바로 위 콜 벽)으로 추천 점수를 조금 조정. 추세 조건을 넘은 상위 8종목만 받음 (deps.options 없으면 건너뜀)
-  const cand = rows.filter(r => r.above && r.rs3 > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+  const cand = rows.filter(r => !r.kr && r.above && r.rs3 > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+  const krRecs = rows.filter(r => r.kr && r.above && r.rs3 > 0).sort((a, b) => b.score - a.score).slice(0, 3); // 국내는 옵션 없이
   if (deps.options) {
     (await pool(cand, 4, x => deps.options(x.t))).forEach((o, i) => {
       if (o && !o.error) { cand[i].opt = o; cand[i].score += o.adj || 0; } else if (o && o.error) errors.push(`옵션 ${cand[i].t}: ${o.error}`);
@@ -146,7 +156,7 @@ export async function makeReport(deps, { data = {}, pos = {} } = {}) {
   const now = deps.now ? deps.now() : new Date();
   const soon = rows.filter(r => r.earnings && r.star && Date.parse(r.earnings) - now.getTime() < 8 * 864e5 && Date.parse(r.earnings) >= now.getTime() - 864e5);
 
-  const out = { date, spy, qqq, vix, vixTxt, mktOpt, sectors, strong, weak, rates, rows, recs, better: rows.filter(r => r.better), soon, errors };
+  const out = { date, spy, qqq, vix, vixTxt, mktOpt, sectors, strong, weak, rates, rows, recs, kr, krRecs, better: rows.filter(r => r.better), soon, errors };
   out.overall = overallOf(out);
   return out;
 }
@@ -188,8 +198,20 @@ export function reportMessages(r) {
   if (R.hy != null) m3.push(`하이일드 스프레드 ${R.hy.toFixed(2)}%${R.hyChg != null ? ` (한 달 ${R.hyChg >= 0 ? "+" : ""}${R.hyChg.toFixed(2)})` : ""}`);
   if (R.dxy1 != null) m3.push(`달러지수 한 달 ${pct(R.dxy1)}`);
   out.push(m3.join("\n"));
+  // 국내 시장 (코스피·코스닥·원/달러) + 국내 추천
+  const K = r.kr || {};
+  if (K.kospi || K.kosdaq) {
+    const m = [`🇰🇷 국내 시장${K.date ? ` ${K.date}` : ""}`];
+    if (K.kospi) m.push(`코스피: ${K.kospi.kind} (${K.kospiLast ? Math.round(K.kospiLast).toLocaleString("ko-KR") + " · " : ""}200일선 ${pct(K.kospi.dist)}, 한 달 ${pct(K.kospi.m1)})`);
+    if (K.kosdaq) m.push(`코스닥: ${K.kosdaq.kind} (200일선 ${pct(K.kosdaq.dist)}, 한 달 ${pct(K.kosdaq.m1)})`);
+    if (K.fx) m.push(`원/달러 ${Math.round(K.fx).toLocaleString("ko-KR")}원${K.fx1 != null ? ` (한 달 ${pct(K.fx1)})` : ""}`);
+    out.push(m.join("\n"));
+  }
+  const krRows = r.rows.filter(x => x.kr);
+  if (r.krRecs && r.krRecs.length) out.push(`🇰🇷 내 국내 종목 중 추천 (추세·코스피 대비 상대강도)\n${r.krRecs.map(x => `${x.t} 3개월 ${pct(x.rs3, 0)} · 잘 맞는 신호 ${x.best ? `${x.best.name} ${pct(x.best.ret, 0)}` : "-"}${x.star ? "" : " · ★없음"}`).join("\n")}`);
+  else if (krRows.length) out.push("🇰🇷 내 국내 종목 중 지금 추세·상대강도 조건을 모두 넘는 종목이 없습니다.");
   if (r.recs.length) out.push(`⭐ 내 종목 중 추천 (추세·상대강도·섹터)\n${r.recs.map(x => `${x.t}${x.secKo ? `(${x.secKo})` : ""} 3개월 ${pct(x.rs3, 0)} · 잘 맞는 신호 ${x.best ? `${x.best.name} ${pct(x.best.ret, 0)}` : "-"}${x.star ? "" : " · ★없음"}${x.opt && x.opt.txt ? `\n  옵션: ${x.opt.txt}` : ""}`).join("\n")}`);
-  else if (r.rows.length) out.push("⭐ 내 종목 중 지금 추세·상대강도 조건을 모두 넘는 종목이 없습니다.");
+  else if (r.rows.some(x => !x.kr)) out.push("⭐ 내 종목 중 지금 추세·상대강도 조건을 모두 넘는 종목이 없습니다.");
   const m5 = [];
   r.better.slice(0, 3).forEach(x => m5.push(`${x.t}: 지금 ★ ${x.cur.name} ${pct(x.cur.ret, 0)} → ${x.best.name} ${pct(x.best.ret, 0)} 이 2년간 더 좋았음`));
   r.soon.slice(0, 3).forEach(x => m5.push(`⚠ ${x.t} 실적 발표 ${x.earnings.slice(5).replace("-", "/")} — 매수 승인 전에 확인`));

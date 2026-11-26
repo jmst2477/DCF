@@ -165,7 +165,7 @@ async function fred(id) {
 async function runReport(manual = false) {
   const s = await jget(K.data);
   const data = (s && s.data) || {};
-  const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA, options: optDeps() }, { data, pos: (await jget("agent:pos")) || {} });
+  const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA, options: optDeps() }, { data, pos: { ...((await jget("agent:pos")) || {}), ...((await jget("agent:kr:pos")) || {}) } });
   const news = await jget(K.news);
   const fresh = news && Date.now() - Date.parse(news.at) < 30 * 3600e3;
   const dsc = await jget(K.discover);

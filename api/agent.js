@@ -9,7 +9,7 @@
 //   GET ?action=cron&step=close  → 장 마감 뒤 (Vercel Cron, 한국 07시대)
 //   GET ?action=cron&step=scan   → 나스닥100·S&P 상위 50 중 관심 목록 밖 매수 신호 → 승인 요청 (Vercel Cron, 한국 08시대)
 //   GET ?action=cron&step=open   → 예약 주문 (Vercel Cron, 한국 11시대)
-//   GET ?action=cron&step=krclose → 국내 장 마감 뒤 (Vercel Cron, 한국 16:20)
+//   GET ?action=cron&step=krclose → 국내 어제 종가 확인 (Vercel Cron, 한국 07:50 아침)
 //   GET ?action=cron&step=kropen  → 국내 주문 (Vercel Cron, 한국 08:40 장 전 동시호가)
 //   POST { action, password, id? }  action = status | approve | reject | pause | resume | close(지금 종가 확인)
 
