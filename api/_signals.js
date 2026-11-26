@@ -147,15 +147,20 @@ export async function checkAll(data, getBars = dailyBars) {
 }
 
 const LABEL = { buy: "매수", exit: "청산", stop: "손절 실행", take: "익절 실행" };
-const money = v => "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// 국내 주식(.KS 코스피, .KQ 코스닥)은 원화
+export const isKR = t => /\.(KS|KQ)$/i.test(String(t || ""));
+const money = (v, t) => isKR(t) ? Math.round(v).toLocaleString("ko-KR") + "원" : "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // 카톡 한 통은 200자까지라 여러 통으로 나눈다
 export function messages(check, { force } = {}) {
   // 오늘(가장 최근 거래일) 봉이 아닌 종목은 빼고 (거래 정지 등)
   const lines = [];
+  // 마지막 거래일은 시장마다 따로 (한쪽만 휴장인 날)
+  const last = {};
+  check.results.forEach(r => { const m = isKR(r.t) ? "kr" : "us"; if (r.date && !(last[m] >= r.date)) last[m] = r.date; });
   check.results.forEach(r => (r.events || []).forEach(e => {
-    if (r.date !== check.date) return;
-    lines.push(`${LABEL[e.kind]} ${r.t}${r.held ? "(보유)" : ""} · ${r.name} · ${money(e.price)}`);
+    if (r.date !== last[isKR(r.t) ? "kr" : "us"]) return;
+    lines.push(`${LABEL[e.kind]} ${r.t}${r.held ? "(보유)" : ""} · ${r.name} · ${money(e.price, r.t)}`);
   }));
   if (!lines.length) return force ? [`${check.date || ""} 종가 기준 새 신호가 없습니다. (${check.results.length}종목 확인)`] : [];
   const head = `📈 ${check.date} 종가 신호`, tail = "매수·청산은 다음 날 시가 기준입니다.";

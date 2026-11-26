@@ -260,7 +260,7 @@ export function makeAgent(deps) {
         if (!(sim.out.buy[i] && !sim.pos)) continue;
         const exch = kisExchange(d.exch);
         const why = paused ? "에이전트 멈춤" : month.stop ? `이번 달 손실 한도(-${L.monthLoss}%)` : busy(it.t) ? "이미 보유·주문 중"
-          : !exch ? `거래소 모름(${d.exch})` : newsBlocks(newsOf(it.t)) ? `뉴스 악재: ${newsOf(it.t).summary}` : buys.filter(b => !b.skip).length + taken >= L.maxBuys ? `하루 ${L.maxBuys}건 한도` : null;
+          : !exch ? (/\.(KS|KQ)$/.test(it.t) ? "국내 주식은 아직 자동 매매 안 함" : `거래소 모름(${d.exch})`) : newsBlocks(newsOf(it.t)) ? `뉴스 악재: ${newsOf(it.t).summary}` : buys.filter(b => !b.skip).length + taken >= L.maxBuys ? `하루 ${L.maxBuys}건 한도` : null;
         // 사이트와 같은 성적 (내 수수료 설정, 지난 5년·최근 1년)
         const s5 = tradeStats(d, sim, 5), s1 = tradeStats(d, sim, 1);
         const stat = s5 ? { rate: s5.rate, n: s5.n, y1: s1 ? s1.total : null } : null;
