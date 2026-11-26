@@ -4,7 +4,50 @@
 // 다음 실적 발표일은 quoteSummary(calendarEvents)에서 받아 earnings 로, 업종(assetProfile)은 profile 로 붙인다 (예정일이 안 잡혔으면 추정일, 범위면 첫날).
 // 장전·장후(시간외) 가격은 일봉에 들어가지 않으므로 5분봉을 따로 받아 마지막 시간외 거래가를 ext 로 붙인다.
 
+import zlib from "node:zlib";
 import { yahooSession } from "./dcf-inputs.js";
+
+// ---------- 국내 종목 목록: /api/prices?krlist=1 ----------
+// 한투가 매일 공개하는 종목 마스터 파일(코스피·코스닥, zip 안에 cp949 고정폭 글자)을 받아 [코드, 한글 이름, KS|KQ] 목록으로.
+// 형식은 한투 공식 예제(github.com/koreainvestment/open-trading-api, stocks_info/kis_kospi_code_mst.py)를 따랐다:
+// 한 줄 = 단축코드 9자 + 표준코드 12자 + 한글 이름 + 뒤쪽 고정 칸(코스피 227자, 코스닥 221자, 첫 2자는 그룹 코드)
+const MASTER = [
+  { url: "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip", tail: 227, m: "KS" },
+  { url: "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip", tail: 221, m: "KQ" },
+];
+// zip 안의 첫 파일 (중앙 디렉터리에서 크기·위치를 읽는다)
+export function unzipFirst(buf) {
+  let e = buf.length - 22;
+  while (e >= 0 && buf.readUInt32LE(e) !== 0x06054b50) e--;
+  if (e < 0) throw new Error("zip 파일이 아닙니다");
+  const cd = buf.readUInt32LE(e + 16);
+  if (buf.readUInt32LE(cd) !== 0x02014b50) throw new Error("zip 목록을 못 읽었습니다");
+  const method = buf.readUInt16LE(cd + 10), size = buf.readUInt32LE(cd + 20), lho = buf.readUInt32LE(cd + 42);
+  const start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28);
+  const data = buf.subarray(start, start + size);
+  return method === 0 ? data : zlib.inflateRawSync(data);
+}
+export function parseMaster(text, tail, m) {
+  const out = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.length <= tail + 21) continue;
+    const head = line.slice(0, line.length - tail), grp = line.slice(line.length - tail, line.length - tail + 2);
+    const code = head.slice(0, 9).trim(), name = head.slice(21).trim();
+    if (!/^[0-9A-Z]{6}$/.test(code) || !name || grp === "EW") continue; // ELW 는 뺌
+    out.push([code, name, m]);
+  }
+  return out;
+}
+export async function krList(fetchImpl = fetch) {
+  const dec = new TextDecoder("euc-kr");
+  const parts = await Promise.all(MASTER.map(async x => {
+    const r = await fetchImpl(x.url);
+    if (!r.ok) throw new Error("종목 목록을 못 받았습니다: " + r.status);
+    return parseMaster(dec.decode(unzipFirst(Buffer.from(await r.arrayBuffer()))), x.tail, x.m);
+  }));
+  return parts.flat();
+}
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -105,6 +148,16 @@ export async function summary(ticker) {
 }
 
 export default async function handler(req, res) {
+  if (req.query && req.query.krlist) {
+    try {
+      const list = await krList();
+      if (list.length < 1000) throw new Error("종목 목록이 너무 짧습니다 (" + list.length + ")");
+      res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=604800");
+      return res.status(200).json({ at: new Date().toISOString(), list });
+    } catch (e) {
+      return res.status(502).json({ error: String((e && e.message) || e) });
+    }
+  }
   let ticker = String((req.query && req.query.ticker) || "").trim().toUpperCase();
   if (!ticker || !/^[A-Z0-9.\-^=]{1,15}$/.test(ticker)) {
     return res.status(400).json({ error: "ticker 파라미터가 필요합니다. 예: /api/prices?ticker=AAPL" });
