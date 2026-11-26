@@ -43,6 +43,10 @@
     {
       "source": "/r/:id",
       "destination": "/api/kakao?view=:id"
+    },
+    {
+      "source": "/d/:id",
+      "destination": "/api/kakao?deep=:id"
     }
   ]
 }

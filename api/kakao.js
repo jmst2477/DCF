@@ -21,6 +21,7 @@ import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
 import { optionsOf, optionView } from "./options.js";
 import { yahooSession } from "./dcf-inputs.js";
 import { dailyBars, summary } from "./prices.js";
+import { deepParams, startBatch, batchResult, nextStep, deepPage, deepDoc, deepWaitPage, MAX_ROUNDS } from "./_deep.js";
 
 function env(suffixes) {
   for (const s of suffixes) if (process.env[s]) return process.env[s];
@@ -33,7 +34,7 @@ const KEY = process.env.KAKAO_REST_API_KEY || "";
 const SECRET = process.env.KAKAO_CLIENT_SECRET || "";
 const K = {
   pw: "dcf:sync2:pw", data: "dcf:sync2:data", fails: "dcf:sync2:fails",
-  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", discover: "dcf:discover", state: "dcf:kakao:state:", view: "dcf:rv:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
+  tok: "dcf:kakao:tok", report: "dcf:kakao:report", news: "dcf:news", discover: "dcf:discover", state: "dcf:kakao:state:", view: "dcf:rv:", deep: "dcf:deep:", deepMsg: "dcf:deep:msg:", deepCount: "dcf:deep:count:", sent: "dcf:kakao:sent", last: "dcf:kakao:last",
 };
 const MAX_FAILS = 20;
 
@@ -248,6 +249,56 @@ const page = (res, ok, text) => {
   );
 };
 
+// ---------- 🔬 종목 심층 분석 보고서 (Claude, 배치로 맡김) ----------
+const DEEP_PER_DAY = 5; // 하루 최대 요청 수 (Claude 비용)
+const DEEP_TTL = 90 * 86400;
+const todayKst = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+async function deepStart(t) {
+  const n = await redis("INCR", K.deepCount + todayKst());
+  if (n === 1) await redis("EXPIRE", K.deepCount + todayKst(), 2 * 86400);
+  if (n > DEEP_PER_DAY) return [429, `심층 분석은 하루 ${DEEP_PER_DAY}번까지만 요청할 수 있습니다 (Claude 비용). 내일 다시 해 주세요.`];
+  const params = deepParams(t, { today: todayKst() });
+  const batch = await startBatch(params);
+  const id = crypto.randomBytes(16).toString("hex");
+  await redis("SET", K.deep + id, JSON.stringify({ t, at: new Date().toISOString(), batch, round: 1, status: "running" }), "EX", DEEP_TTL);
+  return [200, { id, path: "/d/" + id }];
+}
+// 쓰는 중이면 배치를 한 번 확인해 다음 단계로 넘긴다
+async function deepAdvance(id, v) {
+  if (v.status !== "running") return v;
+  // 페이지를 여러 곳에서 동시에 열어도 다음 단계를 두 번 맡기지 않게
+  if (!(await redis("SET", K.deep + id + ":lock", "1", "NX", "EX", 50))) return v;
+  let r;
+  try { r = await batchResult(v.batch); } catch (e) { v.lastError = String(e.message || e); return v; }
+  if (!r.done) return v;
+  if (r.error) { v.status = "error"; v.error = r.error; }
+  else {
+    const prev = v.round > 1 ? await jget(K.deepMsg + id) : null;
+    const params = deepParams(v.t, { today: v.at.slice(0, 10) });
+    if (prev) params.messages = prev;
+    const st = nextStep(params, r.message);
+    if (st.cont) {
+      if (v.round >= MAX_ROUNDS) { v.status = "error"; v.error = "웹 자료를 너무 오래 찾아 멈췄습니다."; }
+      else {
+        await redis("SET", K.deepMsg + id, JSON.stringify(st.cont), "EX", 3 * 86400);
+        v.batch = await startBatch({ ...params, messages: st.cont });
+        v.round += 1;
+      }
+    } else if (st.error) { v.status = "error"; v.error = st.error; }
+    else {
+      v.status = "done"; v.text = st.text; v.cut = !!st.cut; v.doneAt = new Date().toISOString();
+      await redis("DEL", K.deepMsg + id);
+    }
+  }
+  await redis("SET", K.deep + id, JSON.stringify(v), "EX", DEEP_TTL);
+  // 다 되면 카톡으로 한 번 알림 (카톡 알림을 켠 경우)
+  if (v.status !== "running" && KEY && (await redis("GET", K.tok))) {
+    await sendMemo(v.status === "done" ? `🔬 ${v.t} 종합 기업분석 보고서가 나왔어요.` : `🔬 ${v.t} 기업분석 보고서를 만들지 못했어요: ${v.error}`,
+      origin => origin + "/d/" + id, "보고서 열기").catch(() => {});
+  }
+  return v;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const q = req.query || {};
@@ -285,6 +336,21 @@ export default async function handler(req, res) {
       if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "unauthorized" });
       const r = await runDiscover();
       return res.status(200).json({ picks: r.picks ? r.picks.length : 0, scanned: r.scanned || 0, skipped: r.skipped || null });
+    }
+    // 🔬 심층 분석 보고서 페이지 (/d/<id>). 쓰는 중이면 열 때마다 진행 상황을 확인한다
+    if (req.method === "GET" && q.deep) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Robots-Tag", "noindex");
+      const id = String(q.deep);
+      let v = /^[a-f0-9]{32}$/.test(id) && URL_ && TOKEN ? await jget(K.deep + id) : null;
+      if (!v) return res.status(404).send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:sans-serif;padding:24px">보고서가 없거나 90일이 지나 지워졌습니다. <a href="/">사이트로</a></body>`);
+      v = await deepAdvance(id, v);
+      if (v.status === "done" && q.fmt === "doc") {
+        res.setHeader("Content-Type", "application/msword; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(v.t)}-analysis-${v.doneAt.slice(0, 10)}.doc"`);
+        return res.status(200).send("\ufeff" + deepDoc(v));
+      }
+      return res.status(200).send(v.status === "done" ? deepPage(v, { docHref: `/d/${id}?fmt=doc` }) : deepWaitPage(v));
     }
     // 카카오 로그인 후 돌아오는 곳
     // 리서치 보고서 페이지 (카톡 "보고서 열기")
@@ -332,6 +398,17 @@ export default async function handler(req, res) {
       });
     }
     if (req.method !== "POST") return res.status(405).json({ error: "POST만 됩니다" });
+    const body0 = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
+    if (body0.action === "deep") {
+      if (!URL_ || !TOKEN) return res.status(503).json({ error: "서버 저장소가 없습니다." });
+      if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: "서버에 ANTHROPIC_API_KEY 가 없습니다." });
+      const t = String(body0.ticker || "").trim().toUpperCase();
+      if (!/^[A-Z0-9][A-Z0-9.\-]{0,11}$/.test(t)) return res.status(400).json({ error: "종목 코드가 이상합니다." });
+      const bad0 = await pwError(String(body0.password || ""));
+      if (bad0) return res.status(bad0[0]).json({ error: bad0[1] });
+      const [code, out] = await deepStart(t);
+      return res.status(code).json(code === 200 ? out : { error: out });
+    }
     if (!ready) return res.status(503).json({ error: "카카오 앱 키(KAKAO_REST_API_KEY) 또는 서버 저장소가 아직 없습니다." });
 
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};

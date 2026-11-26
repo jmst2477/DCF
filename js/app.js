@@ -1632,6 +1632,7 @@
     renderWatch();
     $('#modal-title').textContent = t;
     if (moved) { $('#opt-body').innerHTML = '<p class="muted small">펼치면 불러옵니다.</p>'; loadOpt(t); }
+    if (moved && $('#deep-box').open) renderDeep(t);
     $('#modal-sub').textContent = '불러오는 중…';
     $('#modal-sub').className = 'modal-sub';
     if (modalChart) { modalChart.remove(); modalChart = null; }
@@ -1711,6 +1712,33 @@
     body.innerHTML = `<p class="small">${esc(t)} 주가 ${fmtP(j.price)} 기준</p>` + j.expiries.map(e => optExpHtml(e, j.price)).join('');
   }
   $('#opt-box').addEventListener('toggle', () => loadOpt(modalTicker));
+  // 🔬 심층 분석 보고서: 요청하면 서버가 Claude 에 맡기고 /d/<id> 주소를 돌려준다. 이 브라우저에 종목별로 지난 보고서 주소를 기억
+  const DEEP_KEY = 'dcf-deep';
+  function renderDeep(t) {
+    const body = $('#deep-body'); if (!body) return;
+    const list = ((lsGet(DEEP_KEY, {}) || {})[t] || []).slice(-5).reverse();
+    body.innerHTML = `<p><button type="button" class="mini" data-deep-go>🔬 ${esc(t || '')} 보고서 요청</button> <span class="muted small" id="deep-msg"></span></p>` +
+      (list.length ? `<p class="small">이 브라우저에서 요청한 보고서: ${list.map(x => `<a href="${esc(x.path)}" target="_blank" rel="noopener">${esc(String(x.at).slice(0, 10))}</a>`).join(' · ')}</p>` : '');
+  }
+  $('#deep-box').addEventListener('toggle', () => { if ($('#deep-box').open) renderDeep(modalTicker); });
+  $('#deep-body').addEventListener('click', async e => {
+    if (!e.target.closest('[data-deep-go]')) return;
+    const t = modalTicker, msg = $('#deep-msg');
+    if (!t) return;
+    const pw = sGet('dcf-sync-pw');
+    if (!pw) { msg.textContent = '먼저 ☁ 자동 동기화를 켜 주세요. 그 비밀번호로 요청합니다.'; return; }
+    if (!confirm(`${t} 심층 분석 보고서를 요청할까요?\n10~40분(길면 몇 시간) 걸리고 Claude 비용이 약 1~3달러 듭니다. 하루 5번까지.`)) return;
+    const btn = e.target.closest('button'); btn.disabled = true; msg.textContent = '요청하는 중…';
+    try {
+      const res = await fetch('/api/kakao', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deep', ticker: t, password: pw }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || '요청 실패');
+      const all = lsGet(DEEP_KEY, {}) || {}; (all[t] = all[t] || []).push({ path: j.path, at: new Date().toISOString() }); lsSet(DEEP_KEY, all);
+      renderDeep(t);
+      $('#deep-msg').innerHTML = `요청했습니다. <a href="${esc(j.path)}" target="_blank" rel="noopener">진행 상황·보고서 열기</a> (다 되면 카톡 알림도 갑니다)`;
+      window.open(j.path, '_blank', 'noopener');
+    } catch (err) { msg.textContent = err.message || String(err); btn.disabled = false; }
+  });
   // 실시간 갱신: 화면이 보이고 차트 탭이 열려 있을 때만, 1분마다 목록 종목 + 보던 종목을 새로 받음
   let liveBusy = false;
   async function liveTick() {
