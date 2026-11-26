@@ -303,6 +303,30 @@
   // ---------- 매매 신호·차트 지표 (js/strategy.js 의 STRATEGIES, CHART_INDICATORS + "＋ 추가"로 넣은 것) ----------
   // 국내 주식(.KS 코스피, .KQ 코스닥)은 원화로
   const isKR = t => /\.(KS|KQ)$/.test(String(t || ''));
+  // 국내 종목 한글 이름 (api/prices?krlist=1, 하루 캐시). 받기 전에는 코드만 보임
+  let krList = null, krByCode = {};
+  const krNorm = s => String(s || '').toLowerCase().replace(/[\s().·&-]/g, '');
+  const krName = t => (isKR(t) && krByCode[t.slice(0, 6)] ? krByCode[t.slice(0, 6)].n : '');
+  let krLoading = null;
+  function loadKr() {
+    if (krList || krLoading) return krLoading || Promise.resolve(krList);
+    krLoading = fetch('api/prices?krlist=1').then(r => r.json()).then(j => {
+      if (!j || !Array.isArray(j.list)) throw new Error((j && j.error) || '목록 없음');
+      krList = j.list.map(([c, n, m]) => ({ c, n, m, k: krNorm(n) }));
+      krByCode = Object.fromEntries(krList.map(x => [x.c, x]));
+      return krList;
+    }).catch(e => { krLoading = null; throw e; });
+    return krLoading;
+  }
+  // 한글 이름(일부만 써도 됨) → 종목. 이름이 똑같은 것 → 이름이 그 글자로 시작하는 것 → 그 글자가 들어 있는 것, 그 안에서는 이름이 짧은 것 먼저
+  function krFind(q, max = 1) {
+    if (!krList) return [];
+    const k = krNorm(q);
+    if (!k) return [];
+    const rank = x => (x.k === k ? 0 : x.k.startsWith(k) ? 1 : x.k.includes(k) ? 2 : 9);
+    return krList.map(x => ({ x, r: rank(x) })).filter(y => y.r < 9).sort((a, b) => a.r - b.r || a.x.n.length - b.x.n.length).slice(0, max).map(y => y.x);
+  }
+  const krT = x => `${x.c}.${x.m}`;
   const fmtP = (v, t) => isKR(t === undefined ? modalTicker : t) ? Math.round(Number(v)).toLocaleString('ko-KR') + '원'
     : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
@@ -1643,7 +1667,11 @@
     if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) searchRefresh(); // 열려 있으면 새 종목으로 다시 계산
     renderWatch();
     $('#modal-title').textContent = t;
-    getSig(t).then(r => { if (modalTicker === t && r.d.name && isKR(t)) $('#modal-title').textContent = `${t} · ${r.d.name}`; }, () => {});
+    if (isKR(t)) {
+      const showName = () => { if (modalTicker === t && krName(t)) $('#modal-title').textContent = `${krName(t)} · ${t}`; };
+      showName();
+      loadKr().then(() => { showName(); renderWatch(); }).catch(() => getSig(t).then(r => { if (modalTicker === t && r.d.name && !krName(t)) $('#modal-title').textContent = `${t} · ${r.d.name}`; }, () => {}));
+    }
     if (moved) { $('#opt-body').innerHTML = '<p class="muted small">펼치면 불러옵니다.</p>'; loadOpt(t); }
     if (moved && $('#deep-box').open) renderDeep(t);
     $('#modal-sub').textContent = '불러오는 중…';
@@ -1833,7 +1861,7 @@
       const saved = watch.includes(t), h = holds.includes(t);
       return `
       <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}"${saved ? ' data-saved="1"' : ''}>
-        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><span class="wl-name"><b>${esc(t)}</b>${saved ? `<span class="wl-theme ${themes[t] ? '' : 'none'}" data-theme-t="${esc(t)}" title="테마 정하기 (예: 전력, 우주)">${themes[t] ? esc(themes[t]) : '＋테마'}</span>` : ''}</span><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
+        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><span class="wl-name">${krName(t) ? `<b>${esc(krName(t))}</b> <span class="muted small">${esc(t.slice(0, 6))}</span>` : `<b>${esc(t)}</b>`}${saved ? `<span class="wl-theme ${themes[t] ? '' : 'none'}" data-theme-t="${esc(t)}" title="테마 정하기 (예: 전력, 우주)">${themes[t] ? esc(themes[t]) : '＋테마'}</span>` : ''}</span><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
         ${saved ? `<button type="button" class="wl-kind ${h ? 'hold' : ''}" data-kind="${esc(t)}" title="${h ? '누르면 관심종목으로 옮깁니다' : '실제로 갖고 있으면 누르세요 (보유로 옮김)'}">${h ? '보유' : '관심'}</button><button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
       </li>`;
     };
@@ -1943,20 +1971,44 @@
     else if (!$('#chart-modal').hidden) closeModal();
     window.scrollTo(0, 0);
   });
+  $('#wl-input').addEventListener('input', () => {
+    const v = $('#wl-input').value, dl = $('#wl-dl');
+    const last = v.split(',').pop().trim();
+    if (!dl || !/[가-힣]/.test(last)) { if (dl) dl.innerHTML = ''; return; }
+    loadKr().then(() => {
+      const head = v.slice(0, v.length - v.split(',').pop().length);
+      dl.innerHTML = krFind(last, 12).map(x => `<option value="${esc(head + x.n)}">${esc(x.c)} ${x.m === 'KS' ? '코스피' : '코스닥'}</option>`).join('');
+    }).catch(() => {});
+  });
+  // 관심종목에 국내 종목이 있으면 한글 이름을 받아 다시 그림
+  if (watch.some(isKR)) loadKr().then(() => { if (!$('#chart-modal').hidden) renderWatch(); }).catch(() => {});
   $('#wl-form').addEventListener('submit', async e => {
     e.preventDefault();
     // 리포트 종목을 한 번에: "GEV BE CEG" 처럼 띄어 쓰거나 쉼표로 여러 개
-    const raw = $('#wl-input').value.toUpperCase().split(/[\s,]+/).filter(Boolean), hold = $('#wl-kind').value === 'hold';
-    // 국내 주식: 6자리 종목코드(예: 005930)면 코스피·코스닥 중 어디인지 찾아 005930.KS 처럼 붙임
+    const input = $('#wl-input').value.trim(), hold = $('#wl-kind').value === 'hold';
     const msg = $('#wl-msg');
+    // 한글 이름: 쉼표로 나눈 칸이 이름과 딱 맞으면 그대로 (예: "KODEX 200"), 아니면 띄어쓰기로 나눠 하나씩
+    const hasKo = /[가-힣]/.test(input);
+    if (hasKo) { try { await loadKr(); } catch (err) { if (msg) msg.textContent = '국내 종목 목록을 못 받았습니다. 6자리 종목코드로 넣어 주세요.'; return; } }
+    const raw = [];
+    input.split(',').map(s => s.trim()).filter(Boolean).forEach(part => {
+      const exact = hasKo && krList && krList.find(x => x.k === krNorm(part));
+      if (exact) raw.push(krT(exact)); else part.split(/\s+/).filter(Boolean).forEach(w => raw.push(w));
+    });
+    const miss = [];
+    // 국내 주식: 6자리 종목코드(예: 005930)면 코스피·코스닥 중 어디인지 찾아 005930.KS 처럼 붙임
     const ts = await Promise.all(raw.map(async t => {
+      if (/[가-힣]/.test(t)) { const f = krFind(t)[0]; if (!f) miss.push(t); return f ? krT(f) : null; }
+      t = t.toUpperCase();
       if (!/^\d{6}$/.test(t)) return t;
+      if (krByCode[t]) return krT(krByCode[t]);
       try {
         const res = await fetch('api/prices?range=1y&ticker=' + t), j = await res.json().catch(() => ({}));
         if (!res.ok || !j.ticker) throw new Error(j.error || '못 찾음');
         return j.ticker;
       } catch (err) { if (msg) msg.textContent = String(err.message || err); return null; }
     }));
+    if (miss.length && msg) msg.textContent = `'${miss.join("', '")}' 종목을 찾지 못했습니다.`;
     const ok = ts.filter(Boolean).filter(t => addWatch(t, hold));
     if (!ok.length) return;
     if (msg && ok.length === ts.length) msg.textContent = '';
