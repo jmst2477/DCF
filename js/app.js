@@ -832,7 +832,7 @@
       // 한 번 누르면 열고, 다시 누르면 닫아 차트를 크게 돌려놓는다
       const info = $('#modal-info');
       info.open = !info.open;
-      if (info.open) setTimeout(() => { const a = $('#sig-about'); (a || info).scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+      if (info.open) setTimeout(() => { const a = $('#sig-about'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
       return;
     }
     if (b) {
@@ -1712,6 +1712,15 @@
     body.innerHTML = `<p class="small">${esc(t)} 주가 ${fmtP(j.price)} 기준</p>` + j.expiries.map(e => optExpHtml(e, j.price)).join('');
   }
   $('#opt-box').addEventListener('toggle', () => loadOpt(modalTicker));
+  // 새 창처럼 뜨는 칸: 한 번에 하나만, 바깥(어두운 곳)을 누르거나 Esc 로 닫기
+  $$('.modal-info.popup').forEach(d => d.addEventListener('toggle', () => {
+    if (d.open) $$('.modal-info.popup[open]').forEach(o => { if (o !== d) o.open = false; });
+  }));
+  document.addEventListener('pointerdown', e => {
+    const o = $('.modal-info.popup[open]');
+    if (o && !o.contains(e.target) && !e.target.closest('.add-panel, .chip[data-about]')) o.open = false;
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { const o = $('.modal-info.popup[open]'); if (o) o.open = false; } });
   // 🔬 심층 분석 보고서: 요청하면 서버가 Claude 에 맡기고 /d/<id> 주소를 돌려준다. 이 브라우저에 종목별로 지난 보고서 주소를 기억
   const DEEP_KEY = 'dcf-deep';
   function renderDeep(t) {
