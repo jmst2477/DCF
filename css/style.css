@@ -454,3 +454,6 @@ body.wl-resizing { user-select: none; cursor: col-resize; }
 /* 표·결과 칸 끌어서 움직이기 */
 .drag-scroll { cursor: grab; }
 body.drag-scrolling, body.drag-scrolling * { cursor: grabbing !important; user-select: none; }
+.deep-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 8px 0; }
+.deep-way { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.deep-way p { margin: 4px 0 8px; }

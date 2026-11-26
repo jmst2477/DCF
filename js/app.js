@@ -1726,11 +1726,30 @@
   function renderDeep(t) {
     const body = $('#deep-body'); if (!body) return;
     const list = ((lsGet(DEEP_KEY, {}) || {})[t] || []).slice(-5).reverse();
-    body.innerHTML = `<p><button type="button" class="mini" data-deep-go>🔬 ${esc(t || '')} 보고서 요청</button> <span class="muted small" id="deep-msg"></span></p>` +
+    body.innerHTML = `<div class="deep-ways">
+      <div class="deep-way"><b>무료</b> <span class="muted small">내 Claude 구독으로</span>
+        <p class="small">프롬프트를 복사하고 claude.ai 를 엽니다. 새 채팅에 붙여 넣기(Ctrl+V)만 하면 됩니다. 추가 비용 없음.</p>
+        <button type="button" class="mini" data-deep-copy>📋 ${esc(t || '')} 프롬프트 복사 + Claude 열기</button> <span class="muted small" id="deep-copy-msg"></span></div>
+      <div class="deep-way"><b>자동</b> <span class="muted small">사이트가 대신, 1건 약 1~3달러</span>
+        <p class="small">사이트가 Claude 에 맡기고, 다 되면 보고서 페이지·카톡으로 알려 줍니다.</p>
+        <button type="button" class="mini ghost" data-deep-go>🔬 ${esc(t || '')} 보고서 요청</button> <span class="muted small" id="deep-msg"></span></div>
+    </div>` +
       (list.length ? `<p class="small">이 브라우저에서 요청한 보고서: ${list.map(x => `<a href="${esc(x.path)}" target="_blank" rel="noopener">${esc(String(x.at).slice(0, 10))}</a>`).join(' · ')}</p>` : '');
   }
   $('#deep-box').addEventListener('toggle', () => { if ($('#deep-box').open) renderDeep(modalTicker); });
   $('#deep-body').addEventListener('click', async e => {
+    if (e.target.closest('[data-deep-copy]')) {
+      const t = modalTicker, msg = $('#deep-copy-msg'); if (!t) return;
+      const win = window.open('https://claude.ai/new', '_blank'); if (win) win.opener = null; // 팝업 차단을 피하려고 누르자마자 엽니다
+      try {
+        const res = await fetch('/api/kakao?action=deepprompt&ticker=' + encodeURIComponent(t));
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(j.error || '프롬프트를 못 받았습니다');
+        await navigator.clipboard.writeText(j.text);
+        msg.textContent = win ? '복사했습니다. 열린 Claude 창에 붙여 넣으세요 (Ctrl+V).' : '복사했습니다. claude.ai 를 열어 붙여 넣으세요 (Ctrl+V).';
+      } catch (err) { msg.textContent = '복사 실패: ' + (err.message || err); }
+      return;
+    }
     if (!e.target.closest('[data-deep-go]')) return;
     const t = modalTicker, msg = $('#deep-msg');
     if (!t) return;

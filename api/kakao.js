@@ -21,7 +21,7 @@ import { tickerNews, analyzeNews, newsMessages } from "./_news.js";
 import { optionsOf, optionView } from "./options.js";
 import { yahooSession } from "./dcf-inputs.js";
 import { dailyBars, summary } from "./prices.js";
-import { deepParams, startBatch, batchResult, nextStep, deepPage, deepDoc, deepWaitPage, MAX_ROUNDS } from "./_deep.js";
+import { deepPromptText, deepParams, startBatch, batchResult, nextStep, deepPage, deepDoc, deepWaitPage, MAX_ROUNDS } from "./_deep.js";
 
 function env(suffixes) {
   for (const s of suffixes) if (process.env[s]) return process.env[s];
@@ -354,6 +354,12 @@ export default async function handler(req, res) {
     }
     // 카카오 로그인 후 돌아오는 곳
     // 리서치 보고서 페이지 (카톡 "보고서 열기")
+    // 심층 분석 프롬프트 글 (무료로 내 Claude 채팅에 붙여 넣기용, 비용 없음)
+    if (req.method === "GET" && q.action === "deepprompt") {
+      const t = String(q.ticker || "").trim().toUpperCase();
+      if (!/^[A-Z0-9][A-Z0-9.\-]{0,11}$/.test(t)) return res.status(400).json({ error: "종목 코드가 이상합니다." });
+      return res.status(200).json({ text: deepPromptText(t, todayKst()) });
+    }
     if (req.method === "GET" && q.view) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("X-Robots-Tag", "noindex");
