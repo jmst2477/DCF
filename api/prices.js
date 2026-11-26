@@ -57,6 +57,8 @@ export function toBars(res) {
 
 // 5분봉(장전·장후 포함)의 마지막 거래가. 정규장 시간(9:30~16:00, 거래소 현지 시각)이면 일봉에 이미 있으므로 null
 export function extQuote(res) {
+  const tz = (res.meta && res.meta.exchangeTimezoneName) || "";
+  if (tz && !/^America\//.test(tz)) return null; // 장전·장후는 미국 종목만
   const q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
   const off = (res.meta && res.meta.gmtoffset) || 0;
   const ts = res.timestamp || [];
@@ -103,11 +105,26 @@ export async function summary(ticker) {
 }
 
 export default async function handler(req, res) {
-  const ticker = String((req.query && req.query.ticker) || "").trim().toUpperCase();
+  let ticker = String((req.query && req.query.ticker) || "").trim().toUpperCase();
   if (!ticker || !/^[A-Z0-9.\-^=]{1,15}$/.test(ticker)) {
     return res.status(400).json({ error: "ticker 파라미터가 필요합니다. 예: /api/prices?ticker=AAPL" });
   }
   const range = ["1y", "2y", "5y"].includes(req.query.range) ? req.query.range : "2y";
+  // 국내 주식: 6자리 종목코드만 넣으면 코스피(.KS) → 코스닥(.KQ) 순서로 찾아 본다
+  if (/^\d{6}$/.test(ticker)) {
+    let found = null;
+    for (const sfx of [".KS", ".KQ"]) {
+      try { await chart(ticker + sfx, "5d", { "User-Agent": UA }); found = ticker + sfx; break; } catch { /* 다음 시장 */ }
+    }
+    if (!found) {
+      const { H, crumb } = await yahooSession().catch(() => ({}));
+      for (const sfx of [".KS", ".KQ"]) {
+        try { await chart(ticker + sfx, "5d", H, crumb); found = ticker + sfx; break; } catch { /* 다음 시장 */ }
+      }
+    }
+    if (!found) return res.status(404).json({ error: `${ticker}: 코스피·코스닥에서 찾지 못했습니다.` });
+    ticker = found;
+  }
   // 실적 발표일은 따로 받고, 실패해도 차트는 그린다
   const sum = summary(ticker).catch(() => ({}));
   try {
@@ -130,6 +147,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ticker,
       currency: (r.meta && r.meta.currency) || "USD",
+      name: (r.meta && (r.meta.longName || r.meta.shortName)) || null,
       exchangeTz: (r.meta && r.meta.exchangeTimezoneName) || null,
       lastPrice: (r.meta && r.meta.regularMarketPrice) || bars.close[bars.close.length - 1],
       lastTime: r.meta && r.meta.regularMarketTime ? new Date(r.meta.regularMarketTime * 1000).toISOString() : null,

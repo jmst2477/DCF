@@ -301,7 +301,10 @@
 
   // ---------- 4. 결과 ----------
   // ---------- 매매 신호·차트 지표 (js/strategy.js 의 STRATEGIES, CHART_INDICATORS + "＋ 추가"로 넣은 것) ----------
-  const fmtP = v => '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // 국내 주식(.KS 코스피, .KQ 코스닥)은 원화로
+  const isKR = t => /\.(KS|KQ)$/.test(String(t || ''));
+  const fmtP = (v, t) => isKR(t === undefined ? modalTicker : t) ? Math.round(Number(v)).toLocaleString('ko-KR') + '원'
+    : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtR = r => `<span class="chg ${r >= 0 ? 'up' : 'down'}">${r >= 0 ? '+' : ''}${(r * 100).toFixed(1)}%</span>`;
   // '가리기·삭제' (이 브라우저에 저장): 가린 것은 '다시 보이기'로 돌릴 수 있고, 삭제한 사이트 기본 항목은 다시 나오지 않음
   const HIDDEN_KEY = 'dcf-hidden-items', DELETED_KEY = 'dcf-deleted-items';
@@ -315,13 +318,13 @@
   // 성적 계산 설정: 기간(최근 몇 년), 손절·익절 % (비우면 안 씀). 모든 신호에 똑같이 적용
   const BT_KEY = 'dcf-backtest';
   // 거래 수수료 (한 번 살 때, 한 번 팔 때 각각 %). 기본 0.25% = 신한투자증권 해외주식 온라인 기본 수수료. 이벤트·우대 요율이면 칸에서 바꿈
-  const FEE_DEF = 0.25;
+  const FEE_DEF = 0.25, FEE_KR_DEF = 0.12; // 국내: 온라인 수수료 약 0.015% + 팔 때 세금 0.2% → 한쪽 평균 약 0.12%
   // years: 1·3·5 = 최근 몇 년, 0 = 직접 정한 기간 (from ~ to, to 가 비면 마지막 날까지)
   const isDay = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
   // minN·minRate: '손절·익절 찾기'에 보여 줄 최소 기준 (거래 몇 번 이상, 승률 몇 % 이상). 기본 5번·65%
   const MIN_N_DEF = 5, MIN_RATE_DEF = 65;
   const okN = v => Number.isInteger(v) && v >= 1 && v <= 100, okR = v => typeof v === 'number' && v >= 0 && v <= 100;
-  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '', fee: typeof o.fee === 'number' && o.fee >= 0 && o.fee <= 3 ? o.fee : FEE_DEF, minN: okN(o.minN) ? o.minN : MIN_N_DEF, minRate: okR(o.minRate) ? o.minRate : MIN_RATE_DEF }; } catch (e) { return { years: 5, from: '', to: '', fee: FEE_DEF, minN: MIN_N_DEF, minRate: MIN_RATE_DEF }; } })();
+  const bt = (() => { try { const o = JSON.parse(localStorage.getItem(BT_KEY)) || {}; return { years: [0, 1, 3, 5].includes(o.years) ? o.years : 5, from: isDay(o.from) ? o.from : '', to: isDay(o.to) ? o.to : '', fee: typeof o.fee === 'number' && o.fee >= 0 && o.fee <= 3 ? o.fee : FEE_DEF, feeKr: typeof o.feeKr === 'number' && o.feeKr >= 0 && o.feeKr <= 3 ? o.feeKr : FEE_KR_DEF, minN: okN(o.minN) ? o.minN : MIN_N_DEF, minRate: okR(o.minRate) ? o.minRate : MIN_RATE_DEF }; } catch (e) { return { years: 5, from: '', to: '', fee: FEE_DEF, feeKr: FEE_KR_DEF, minN: MIN_N_DEF, minRate: MIN_RATE_DEF }; } })();
   const saveBt = () => lsSet(BT_KEY, bt);
   // 손절·익절은 종목+신호마다 따로 저장: { AEHR: { 'stoch-x': {sl:10, tp:30} } }. 없으면 안 씀
   // (예전 형식 { AEHR: {sl, tp} } 은 아래 migrateSltp 에서 그 종목의 적용 신호 칸으로 옮김)
@@ -335,15 +338,17 @@
     if (Object.keys(m).length) sltp[t] = m; else delete sltp[t];
     lsSet(SLTP_KEY, sltp);
   }
-  const simKey = (s, rule) => `${s.id}|${rule.sl || ''}|${rule.tp || ''}|${bt.fee}`;
+  const feeOf = t => (isKR(t) ? bt.feeKr : bt.fee); // % (살 때·팔 때 각각)
+  const simKey = (s, rule) => `${s.id}|${rule.sl || ''}|${rule.tp || ''}|${bt.fee}|${bt.feeKr}`;
 
   // 트레이딩뷰 strategy와 같은 방식: 신호 봉 종가에서 판단 → 다음 봉 시가에 체결, 보유 중엔 매수 표시 안 함.
   // 손절·익절: 보유 중 그날 저가가 손절가 아래면 손절가(시가가 이미 아래면 시가)에, 고가가 익절가 위면 익절가에 판다. 같은 날 둘 다 닿으면 손절로 본다.
   function simulate(d, strat, rule) {
+    const fu = feeOf(d.ticker);
     rule = rule || { sl: null, tp: null };
     const out = strat.run(d, window.TA);
     // 사용자가 정한 수수료(증권사 실제 요율)를 신호 기본값보다 먼저 씀
-    const n = d.close.length, fee = bt.fee >= 0 ? bt.fee / 100 : out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
+    const n = d.close.length, fee = fu >= 0 ? fu / 100 : out && out.commission != null ? out.commission : strat.commission != null ? strat.commission : 0.0005;
     if (!out || !Array.isArray(out.buy) || !Array.isArray(out.exit)) throw new Error('buy·exit 배열을 돌려주지 않았습니다.');
     const sl = rule.sl / 100, tp = rule.tp / 100;
     const marks = [], trades = [];
@@ -568,6 +573,7 @@
     if (document.activeElement !== $('#bt-sl')) $('#bt-sl').value = rule.sl || '';
     if (document.activeElement !== $('#bt-tp')) $('#bt-tp').value = rule.tp || '';
     if (document.activeElement !== $('#bt-fee')) $('#bt-fee').value = bt.fee;
+    if (document.activeElement !== $('#bt-fee-kr')) $('#bt-fee-kr').value = bt.feeKr;
     // 손절·익절 칸은 "이 종목 + 지금 신호" 값. 종목을 열 때 먼저 켜지는 신호(적용 신호)는 ★로 표시
     const cs = STRATS.find(x => x.id === stratSel);
     $('#bt-for').textContent = mt && cs ? `${mt} · ${cs.short || cs.name} 전용${tstrat[mt] === cs.id ? ' ★' : ''}` : '';
@@ -596,6 +602,11 @@
   $('#bt-fee').addEventListener('change', e => {
     const v = parseFloat(e.target.value);
     bt.fee = v >= 0 && v <= 3 ? v : FEE_DEF;
+    btChanged();
+  });
+  $('#bt-fee-kr').addEventListener('change', e => {
+    const v = parseFloat(e.target.value);
+    bt.feeKr = v >= 0 && v <= 3 ? v : FEE_KR_DEF;
     btChanged();
   });
   ['sl', 'tp'].forEach(k => $('#bt-' + k).addEventListener('change', e => {
@@ -788,14 +799,15 @@
     const pct = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%</span>`;
     const done = out.filter(x => x.b).length;
     // 거래마다 무조건 500만원씩만 샀다면 번 돈을 모두 더한 금액 (번 돈은 다시 넣지 않음). 거래별 수익률에 사고팔 때 수수료가 이미 들어 있음
-    const PER = 5e6, fee = bt.fee / 100;
+    const PER = 5e6;
     const money = st => PER * st.n * st.avg;
     const man = v => `${v >= 0 ? '+' : '-'}${Math.round(Math.abs(v) / 1e4).toLocaleString('ko-KR')}만원`;
     const won = v => `<span class="chg ${v >= 0 ? 'up' : 'down'}">${man(v)}</span>`;
     const okRows = out.filter(x => x.b), sumN = okRows.reduce((a, x) => a + x.b.st.n, 0), sumM = okRows.reduce((a, x) => a + money(x.b.st), 0);
-    const sumFee = sumN * PER * fee * 2;
+    const sumFee = okRows.reduce((a, x) => a + x.b.st.n * PER * (feeOf(x.t) / 100) * 2, 0);
+    const feeTxt = [...new Set(okRows.map(x => (isKR(x.t) ? '국내 ' : (okRows.some(y => isKR(y.t)) ? '해외 ' : '')) + feeOf(x.t) + '%'))].join(', ');
     optRender(`<p class="small pos">${done}종목에 적용했습니다${out.length > done ? `, ${out.length - done}종목은 기준을 넘는 조합이 없어 그대로 두었습니다` : ''}.</p>
-      ${okRows.length ? `<p class="opt-sum">거래마다 500만원씩만 샀다면 (${esc(btName())}): 거래 ${sumN.toLocaleString('ko-KR')}번 · 누적 수익금 <b>${won(sumM)}</b> <span class="muted small">수수료 약 ${Math.round(sumFee / 1e4).toLocaleString('ko-KR')}만원 빼고 (한 번 살 때·팔 때 각 ${bt.fee}%), 세금 전</span></p>` : ''}
+      ${okRows.length ? `<p class="opt-sum">거래마다 500만원씩만 샀다면 (${esc(btName())}): 거래 ${sumN.toLocaleString('ko-KR')}번 · 누적 수익금 <b>${won(sumM)}</b> <span class="muted small">수수료 약 ${Math.round(sumFee / 1e4).toLocaleString('ko-KR')}만원 빼고 (한 번 살 때·팔 때 각 ${feeTxt}), 세금 전</span></p>` : ''}
       <div class="table-scroll"><table class="grid"><thead><tr><th>종목</th><th>★ 신호</th><th>손절</th><th>익절</th><th>거래</th><th>승률</th><th>누적</th><th title="거래마다 500만원씩만 샀다면 번 돈을 모두 더한 금액 (번 돈은 다시 넣지 않음, 수수료 포함, 세금 전)">누적 수익금<br><span class="muted small">500만원씩</span></th><th>최근 1년</th><th title="적용하기 전에 ★였던 신호">이전 ★</th></tr></thead><tbody>${out.map(x => x.b
         ? `<tr><td><b>${esc(x.t)}</b></td><td>${esc(x.b.s.name)}</td><td>${x.b.sl ? '-' + x.b.sl + '%' : '안 씀'}</td><td>${x.b.tp ? '+' + x.b.tp + '%' : '안 씀'}</td><td>${x.b.st.n}</td><td>${Math.round(x.b.st.rate * 100)}%</td><td>${pct(x.b.st.total)}</td><td>${won(money(x.b.st))}</td><td>${x.b.y1 == null ? '<span class="muted small">거래 없음</span>' : pct(x.b.y1)}</td><td class="muted small">${esc(x.before)}</td></tr>`
         : `<tr><td><b>${esc(x.t)}</b></td><td colspan="8" class="muted small">${x.err ? '주가를 불러오지 못함' : '기준을 넘는 조합 없음'} · 그대로 둠</td><td class="muted small">${esc(x.before)}</td></tr>`).join('')}</tbody></table></div>
@@ -1631,6 +1643,7 @@
     if (!$('#bt-search').hidden && $('#bt-search').dataset.t !== t) searchRefresh(); // 열려 있으면 새 종목으로 다시 계산
     renderWatch();
     $('#modal-title').textContent = t;
+    getSig(t).then(r => { if (modalTicker === t && r.d.name && isKR(t)) $('#modal-title').textContent = `${t} · ${r.d.name}`; }, () => {});
     if (moved) { $('#opt-body').innerHTML = '<p class="muted small">펼치면 불러옵니다.</p>'; loadOpt(t); }
     if (moved && $('#deep-box').open) renderDeep(t);
     $('#modal-sub').textContent = '불러오는 중…';
@@ -1699,6 +1712,7 @@
   async function loadOpt(t) {
     const body = $('#opt-body');
     if (!t || !$('#opt-box').open) return;
+    if (isKR(t)) { body.innerHTML = '<p class="muted small">국내 주식은 옵션 정보를 받을 곳이 없어 보여 드리지 못합니다.</p>'; return; }
     const c = optCache[t];
     if (!c || Date.now() - c.at > 600e3) {
       body.innerHTML = '<p class="muted small">옵션 불러오는 중…</p>';
@@ -1929,12 +1943,23 @@
     else if (!$('#chart-modal').hidden) closeModal();
     window.scrollTo(0, 0);
   });
-  $('#wl-form').addEventListener('submit', e => {
+  $('#wl-form').addEventListener('submit', async e => {
     e.preventDefault();
     // 리포트 종목을 한 번에: "GEV BE CEG" 처럼 띄어 쓰거나 쉼표로 여러 개
-    const ts = $('#wl-input').value.toUpperCase().split(/[\s,]+/).filter(Boolean);
-    const ok = ts.filter(t => addWatch(t, $('#wl-kind').value === 'hold'));
+    const raw = $('#wl-input').value.toUpperCase().split(/[\s,]+/).filter(Boolean), hold = $('#wl-kind').value === 'hold';
+    // 국내 주식: 6자리 종목코드(예: 005930)면 코스피·코스닥 중 어디인지 찾아 005930.KS 처럼 붙임
+    const msg = $('#wl-msg');
+    const ts = await Promise.all(raw.map(async t => {
+      if (!/^\d{6}$/.test(t)) return t;
+      try {
+        const res = await fetch('api/prices?range=1y&ticker=' + t), j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ticker) throw new Error(j.error || '못 찾음');
+        return j.ticker;
+      } catch (err) { if (msg) msg.textContent = String(err.message || err); return null; }
+    }));
+    const ok = ts.filter(Boolean).filter(t => addWatch(t, hold));
     if (!ok.length) return;
+    if (msg && ok.length === ts.length) msg.textContent = '';
     $('#wl-input').value = '';
     showModalTicker(ok[0]);
   });
