@@ -1,7 +1,7 @@
 // 관심종목 테마 자동 분류
 // 1) 아래 사전에 있는 종목은 그 테마로 (리포트에서 자주 묶이는 산업 기준)
 // 2) 사전에 없으면 야후 업종(/api/prices 의 profile)을 한글 테마로 바꿔서
-// 사용자가 직접 바꾸거나 뺀 테마는 다시 덮어쓰지 않습니다 (js/app.js).
+// 사용자가 직접 바꾸거나 뺀 테마는 다시 덮어쓰지 않습니다 (js/app/chart-view.js).
 (function () {
   const BOOK = {
     '전력': 'GEV BE CEG CAT ETN PWR VRT FIX VST NRG TLN OKLO SMR NNE LEU CCJ UEC NXE BWXT NEE SO DUK AEP D EXC XEL ETR PCG EIX SRE PEG ED AES HUBB MOD NVT POWL AMSC EME MTZ PRIM MYRG ENPH FSLR SEDG RUN PLUG URA NLR',
