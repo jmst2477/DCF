@@ -46,6 +46,15 @@ const store = {
   async set(k, v) { await redis("SET", k, JSON.stringify(v)); },
 };
 
+// 사이트 관심 종목에 보여 줄 한투 잔고 (직접 산 종목 포함, 읽기만)
+async function holdings(kis) {
+  const out = { at: new Date().toISOString(), us: [], kr: [], usd: null, krw: null, errors: [] };
+  try { out.us = (await kis.balance()).map(({ t, qty, avg, price }) => ({ t, qty, avg, price })); } catch (e) { out.errors.push(`미국 잔고: ${e.message || e}`); }
+  try { out.usd = Number((await kis.buyingPower("NASD", "AAPL", 1)).usd); } catch { /* 달러 모름 */ }
+  try { const b = await kis.krBalance(); out.kr = b.rows.map(({ t, name, qty, avg, price }) => ({ t, name, qty, avg, price })); out.krw = b.cash; } catch (e) { out.errors.push(`국내 잔고: ${e.message || e}`); }
+  return out;
+}
+
 function agent(req) {
   const W = libs();
   const kis = makeKis({ store });
@@ -111,7 +120,7 @@ export default async function handler(req, res) {
     if (body.action === "scan") return res.status(200).json(await A.scanStep({ data: await syncData(), origin: originOf(req), force: true }));
     if (body.action === "status") return res.status(200).json(await A.status());
     if (body.action === "broker") return res.status(200).json(await A.broker());
-    if (body.action === "holdings") return res.status(200).json(await A.holdings());
+    if (body.action === "holdings") return res.status(200).json(await holdings(makeKis({ store })));
     if (body.action === "cancel") return res.status(200).json(await A.cancel(String(body.no || "")));
     return res.status(400).json({ error: "action 은 status · approve · reject · pause · resume · close · broker · cancel · holdings" });
   } catch (e) {
