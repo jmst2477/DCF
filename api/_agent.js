@@ -497,9 +497,17 @@ export function makeAgent(deps) {
     try { out.unfilled = await kis.unfilled(); } catch (e) { out.errors.push(`미체결: ${e.message || e}`); }
     return out;
   }
+  // 사이트 관심 종목에 보여 줄 한투 잔고 (직접 산 종목 포함, 읽기만)
+  async function holdings() {
+    const out = { at: now().toISOString(), us: [], kr: [], usd: null, krw: null, errors: [] };
+    try { out.us = (await kis.balance()).map(({ t, qty, avg, price }) => ({ t, qty, avg, price })); } catch (e) { out.errors.push(`미국 잔고: ${e.message || e}`); }
+    try { out.usd = Number((await kis.buyingPower("NASD", "AAPL", 1)).usd); } catch { /* 달러 모름 */ }
+    try { const b = await kis.krBalance(); out.kr = b.rows.map(({ t, name, qty, avg, price }) => ({ t, name, qty, avg, price })); out.krw = b.cash; } catch (e) { out.errors.push(`국내 잔고: ${e.message || e}`); }
+    return out;
+  }
   async function setPaused(v) { await store.set(K.paused, !!v); await log(v ? "에이전트 멈춤" : "에이전트 다시 켬"); }
 
-  return { closeStep, scanStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log, krClose: kr.closeStep, krOpen: kr.openStep, krNxt: kr.nxtStep };
+  return { closeStep, scanStep, openStep, approve, status, setPaused, reconcile, cancel, broker, holdings, note: log, krClose: kr.closeStep, krOpen: kr.openStep, krNxt: kr.nxtStep };
 }
 
 // 카톡 한 통 200자 제한

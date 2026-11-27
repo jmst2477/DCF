@@ -111,8 +111,9 @@ export default async function handler(req, res) {
     if (body.action === "scan") return res.status(200).json(await A.scanStep({ data: await syncData(), origin: originOf(req), force: true }));
     if (body.action === "status") return res.status(200).json(await A.status());
     if (body.action === "broker") return res.status(200).json(await A.broker());
+    if (body.action === "holdings") return res.status(200).json(await A.holdings());
     if (body.action === "cancel") return res.status(200).json(await A.cancel(String(body.no || "")));
-    return res.status(400).json({ error: "action 은 status · approve · reject · pause · resume · close · broker · cancel" });
+    return res.status(400).json({ error: "action 은 status · approve · reject · pause · resume · close · broker · cancel · holdings" });
   } catch (e) {
     return res.status(500).json({ error: String((e && e.message) || e) });
   }

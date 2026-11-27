@@ -1869,6 +1869,56 @@
   function renderWlMode() {
     $$('#wl-mode [data-wl-mode]').forEach(b => b.classList.toggle('on', b.dataset.wlMode === wlMode));
   }
+  // ---------- 한투 잔고 (보유 수량·평단가) ----------
+  // 에이전트 비밀번호로 서버(api/agent)에서 받아 이 브라우저에만 기억. 비밀번호는 이 화면을 닫으면 사라짐
+  let kisPw = '', kisHold = lsGet('dcf-kis-hold', null);
+  const kisRow = t => {
+    if (!kisHold) return null;
+    return isKR(t) || /^\d{6}$/.test(t) ? (kisHold.kr || []).find(x => x.t === String(t).slice(0, 6)) || null : (kisHold.us || []).find(x => x.t === t) || null;
+  };
+  const kisMoney = (kr, v) => (kr ? Math.round(v).toLocaleString('ko-KR') + '원' : '$' + Number(v).toFixed(2));
+  const kisTxt = t => {
+    const h = kisRow(t);
+    if (!h) return '';
+    const kr = isKR(t) || /^\d{6}$/.test(t), pl = h.avg > 0 && h.price > 0 ? h.price / h.avg - 1 : null;
+    return `🏦 ${h.qty}주 · 평단 ${kisMoney(kr, h.avg)}${pl != null ? ` · <span class="chg ${pl >= 0 ? 'up' : 'down'}" title="한투 현재가 ${kisMoney(kr, h.price)} 기준">${pl >= 0 ? '+' : ''}${(pl * 100).toFixed(1)}%</span>` : ''}`;
+  };
+  function renderKis() {
+    const info = $('#kis-info'), miss = $('#kis-miss');
+    if (!info) return;
+    if (!kisHold) { info.textContent = '계좌의 보유 수량·평단가를 목록에 표시'; miss.innerHTML = ''; return; }
+    const d = new Date(kisHold.at), n = (kisHold.us || []).length + (kisHold.kr || []).length;
+    info.innerHTML = `${n}종목 · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 기준`
+      + (kisHold.usd != null ? ` · 달러 $${Number(kisHold.usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '') + (kisHold.krw != null ? ` · 원화 ${Math.round(kisHold.krw).toLocaleString('ko-KR')}원` : '')
+      + ((kisHold.errors || []).length ? ` · <span class="down">${esc(kisHold.errors.join(' / '))}</span>` : '');
+    // 한투에 있는데 목록에 없는 종목 → 보유로 추가
+    const codes = new Set(watch.map(t => String(t).slice(0, 6)));
+    const out = (kisHold.us || []).filter(x => !watch.includes(x.t)).map(x => ({ k: x.t, label: x.t, qty: x.qty }))
+      .concat((kisHold.kr || []).filter(x => !codes.has(x.t)).map(x => ({ k: x.t, label: x.name || x.t, qty: x.qty })));
+    miss.innerHTML = out.length ? `<span class="muted">목록에 없는 보유 종목</span> ${out.map(x => `<button type="button" class="chip" data-kis-add="${esc(x.k)}" title="보유 종목으로 추가">＋ ${esc(x.label)} ${x.qty}주</button>`).join('')}${out.length > 1 ? `<button type="button" class="chip" data-kis-add="${esc(out.map(x => x.k).join(' '))}">＋ 모두 추가</button>` : ''}` : '';
+  }
+  async function kisLoad() {
+    const info = $('#kis-info');
+    info.textContent = '불러오는 중…';
+    try {
+      const r = await fetch('api/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'holdings', password: kisPw }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { if (r.status === 401 || r.status === 429) kisPw = ''; throw new Error(j.error || r.status); }
+      kisHold = j; lsSet('dcf-kis-hold', j);
+      $('#kis-form').hidden = true;
+      renderKis(); renderWatch();
+    } catch (err) { info.innerHTML = `<span class="down">${esc(String(err.message || err))}</span>`; if (!kisPw) $('#kis-form').hidden = false; }
+  }
+  $('#kis-btn').addEventListener('click', () => { if (kisPw) kisLoad(); else { const f = $('#kis-form'); f.hidden = !f.hidden; if (!f.hidden) $('#kis-pw').focus(); } });
+  $('#kis-form').addEventListener('submit', e => { e.preventDefault(); kisPw = $('#kis-pw').value; $('#kis-pw').value = ''; if (kisPw) kisLoad(); });
+  $('#kis-miss').addEventListener('click', e => {
+    const b = e.target.closest('[data-kis-add]');
+    if (!b) return;
+    // 추가 칸으로 넣음 (국내 6자리 코드는 코스피·코스닥을 찾아 붙여 줌), 보유로
+    $('#wl-input').value = b.dataset.kisAdd; $('#wl-kind').value = 'hold';
+    $('#wl-form').requestSubmit();
+    setTimeout(renderKis, 1500);
+  });
   function renderWatch() {
     renderWlMode();
     const list = $('#wl-list');
@@ -1880,7 +1930,7 @@
       const saved = watch.includes(t), h = holds.includes(t);
       return `
       <li class="${t === modalTicker ? 'on' : ''}" data-t="${esc(t)}"${saved ? ' data-saved="1"' : ''}>
-        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><span class="wl-name">${krName(t) ? `<b>${esc(krName(t))}</b> <span class="muted small">${esc(t.slice(0, 6))}</span>` : `<b>${esc(t)}</b>`}${saved ? `<span class="wl-theme ${themes[t] ? '' : 'none'}" data-theme-t="${esc(t)}" title="테마 정하기 (예: 전력, 우주)">${themes[t] ? esc(themes[t]) : '＋테마'}</span>` : ''}</span><span class="wl-rate" data-r="${esc(t)}"></span></span><span class="wl-val" data-v="${esc(t)}">…</span></button>
+        ${saved ? '<span class="wl-grip" title="끌어서 순서 바꾸기 · 보유/관심 칸 옮기기">⋮⋮</span>' : ''}<button type="button" class="wl-pick"><span class="wl-left"><span class="wl-name">${krName(t) ? `<b>${esc(krName(t))}</b> <span class="muted small">${esc(t.slice(0, 6))}</span>` : `<b>${esc(t)}</b>`}${saved ? `<span class="wl-theme ${themes[t] ? '' : 'none'}" data-theme-t="${esc(t)}" title="테마 정하기 (예: 전력, 우주)">${themes[t] ? esc(themes[t]) : '＋테마'}</span>` : ''}</span><span class="wl-rate" data-r="${esc(t)}"></span>${kisTxt(t) ? `<span class="wl-kis">${kisTxt(t)}</span>` : ''}</span><span class="wl-val" data-v="${esc(t)}">…</span></button>
         ${saved ? `<button type="button" class="wl-kind ${h ? 'hold' : ''}" data-kind="${esc(t)}" title="${h ? '누르면 관심종목으로 옮깁니다' : '실제로 갖고 있으면 누르세요 (보유로 옮김)'}">${h ? '보유' : '관심'}</button><button type="button" class="wl-del" title="빼기" data-del="${esc(t)}">✕</button>` : `<button type="button" class="wl-add" title="관심종목에 추가" data-add="${esc(t)}">＋</button>`}
       </li>`;
     };
