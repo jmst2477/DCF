@@ -1881,7 +1881,7 @@
     const h = kisRow(t);
     if (!h) return '';
     const kr = isKR(t) || /^\d{6}$/.test(t), pl = h.avg > 0 && h.price > 0 ? h.price / h.avg - 1 : null;
-    return `🏦 ${h.qty}주 · 평단 ${kisMoney(kr, h.avg)}${pl != null ? ` · <span class="chg ${pl >= 0 ? 'up' : 'down'}" title="한투 현재가 ${kisMoney(kr, h.price)} 기준">${pl >= 0 ? '+' : '−'}${kisMoney(kr, Math.abs((h.price - h.avg) * h.qty))} (${pl >= 0 ? '+' : ''}${(pl * 100).toFixed(1)}%)</span>` : ''}`;
+    return `🏦 ${h.qty}주 · 평단 ${kisMoney(kr, h.avg)}${pl != null ? ` · <span class="chg ${pl >= 0 ? 'up' : 'down'}" title="한투 현재가 ${kisMoney(kr, h.price)} 기준">${pl >= 0 ? '+' : ''}${(pl * 100).toFixed(1)}%</span>` : ''}`;
   };
   function renderKis() {
     const info = $('#kis-info'), miss = $('#kis-miss');
