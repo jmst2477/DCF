@@ -579,7 +579,7 @@
         const st = pickRates[s.id];
         return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
       }).join('')
-        + (STRATS.length > 1 ? `<button type="button" class="chip more" data-sig-fold title="${fold ? '모든 신호와 승률을 펼쳐 봅니다' : '고른 신호 하나만 남기고 줄입니다'}">${fold ? `다른 신호 ${STRATS.length - 1}개 ▾` : '접기 ▴'}</button>` : '')
+        + (STRATS.length > 1 ? `<button type="button" class="chip more" data-sig-fold title="${fold ? '모든 신호와 승률을 펼쳐 봅니다' : '고른 신호 하나만 남기고 줄입니다'}">${fold ? '펼치기 ▾' : '접기 ▴'}</button>` : '')
         + (fold ? '' : '<button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">가리기·삭제</button>');
     });
     $$('.ind-pick').forEach(box => {
@@ -882,7 +882,6 @@
       if (b.dataset.sid === stratSel) return;
       stratSel = baseSel = b.dataset.sid;
       lsSet('dcf-strategy-id', stratSel);
-      if (!sigFold) { sigFold = true; lsSet('dcf-sig-fold', true); }
       searchRefresh(); // 열려 있으면 새 신호로 다시 계산
     } else if (ib) {
       const id = ib.dataset.iid;
