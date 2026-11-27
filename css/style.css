@@ -459,3 +459,7 @@ body.drag-scrolling, body.drag-scrolling * { cursor: grabbing !important; user-s
 .deep-way p { margin: 4px 0 8px; }
 .wl-msg { margin: 4px 0 0; } .wl-msg:empty { display: none; }
 .strat-pick .chip.more { --c: var(--muted); border-style: dashed; color: var(--muted); }
+/* 신호 자세히·옵션·심층 분석은 위쪽 버튼으로만 열고, 닫혀 있을 땐 차트 아래 줄을 숨김 */
+.modal-info.popup:not([open]) { display: none; }
+.head-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.head-btns .chip { font-size: 13px; padding: 4px 11px; }
