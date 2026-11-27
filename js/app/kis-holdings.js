@@ -4,8 +4,8 @@
 'use strict';
 
 // ---------- 한투 잔고 (보유 수량·평단가) ----------
-// 에이전트 비밀번호로 서버(api/agent)에서 받아 이 브라우저에만 기억. 비밀번호는 이 화면을 닫으면 사라짐
-let kisPw = '', kisHold = lsGet('dcf-kis-hold', null);
+// 🤖 에이전트 화면(/api/agent)에서 비밀번호로 불러오면 그 화면이 이 브라우저에 저장(dcf-kis-hold)하고, 여기서는 읽어서 목록 줄에만 보여 줌
+let kisHold = lsGet('dcf-kis-hold', null);
 const kisRow = t => {
   if (!kisHold) return null;
   return isKR(t) || /^\d{6}$/.test(t) ? (kisHold.kr || []).find(x => x.t === String(t).slice(0, 6)) || null : (kisHold.us || []).find(x => x.t === t) || null;
@@ -18,12 +18,12 @@ const kisTxt = t => {
   return `🏦 ${h.qty}주 · 평단 ${kisMoney(kr, h.avg)}${pl != null ? ` · <span class="chg ${pl >= 0 ? 'up' : 'down'}" title="한투 현재가 ${kisMoney(kr, h.price)} 기준">${pl >= 0 ? '+' : '−'}${kisMoney(kr, Math.abs((h.price - h.avg) * h.qty))} (${pl >= 0 ? '+' : ''}${(pl * 100).toFixed(1)}%)</span>` : ''}`;
 };
 function renderKis() {
-  const info = $('#kis-info'), miss = $('#kis-miss');
-  if (!info) return;
-  if (!kisHold) { info.textContent = '계좌의 보유 수량·평단가를 목록에 표시'; miss.innerHTML = ''; return; }
-  const d = new Date(kisHold.at), n = (kisHold.us || []).length + (kisHold.kr || []).length;
-  info.innerHTML = `${n}종목 · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 기준`
-    + (kisHold.usd != null ? ` · 달러 $${Number(kisHold.usd).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : '') + (kisHold.krw != null ? ` · 원화 ${Math.round(kisHold.krw).toLocaleString('ko-KR')}원` : '')
+  const box = $('#kis-box'), info = $('#kis-info'), miss = $('#kis-miss');
+  if (!box) return;
+  box.hidden = !kisHold;
+  if (!kisHold) { info.innerHTML = ''; miss.innerHTML = ''; return; }
+  const d = new Date(kisHold.at);
+  info.innerHTML = `🏦 한투 ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 기준 · <a href="/api/agent" target="_blank" rel="noopener" title="🤖 에이전트 화면에서 비밀번호를 넣으면 새 잔고로 바뀝니다">새로 고침</a>`
     + ((kisHold.errors || []).length ? ` · <span class="down">${esc(kisHold.errors.join(' / '))}</span>` : '');
   // 한투에 있는데 목록에 없는 종목 → 보유로 추가
   const codes = new Set(watch.map(t => String(t).slice(0, 6)));
@@ -31,30 +31,22 @@ function renderKis() {
     .concat((kisHold.kr || []).filter(x => !codes.has(x.t)).map(x => ({ k: x.t, label: x.name || x.t, qty: x.qty })));
   miss.innerHTML = out.length ? `<span class="muted">목록에 없는 보유 종목</span> ${out.map(x => `<button type="button" class="chip" data-kis-add="${esc(x.k)}" title="보유 종목으로 추가">＋ ${esc(x.label)} ${x.qty}주</button>`).join('')}${out.length > 1 ? `<button type="button" class="chip" data-kis-add="${esc(out.map(x => x.k).join(' '))}">＋ 모두 추가</button>` : ''}` : '';
 }
-async function kisLoad() {
-  const info = $('#kis-info');
-  info.textContent = '불러오는 중…';
-  try {
-    const r = await fetch('api/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'holdings', password: kisPw }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) { if (r.status === 401 || r.status === 429) kisPw = ''; throw new Error(j.error || r.status); }
-    kisHold = j; lsSet('dcf-kis-hold', j);
-    $('#kis-form').hidden = true;
-    renderKis(); renderWatch();
-  } catch (err) { info.innerHTML = `<span class="down">${esc(String(err.message || err))}</span>`; if (!kisPw) $('#kis-form').hidden = false; }
-}
-$('#kis-btn').addEventListener('click', () => { if (kisPw) kisLoad(); else { const f = $('#kis-form'); f.hidden = !f.hidden; if (!f.hidden) $('#kis-pw').focus(); } });
-$('#kis-form').addEventListener('submit', e => { e.preventDefault(); kisPw = $('#kis-pw').value; $('#kis-pw').value = ''; if (kisPw) kisLoad(); });
+// 에이전트 화면(다른 탭)에서 잔고를 새로 불러오면 바로 반영
+window.addEventListener('storage', e => {
+  if (e.key !== 'dcf-kis-hold') return;
+  kisHold = lsGet('dcf-kis-hold', null);
+  renderWatch();
+});
 $('#kis-miss').addEventListener('click', e => {
   const b = e.target.closest('[data-kis-add]');
   if (!b) return;
   // 추가 칸으로 넣음 (국내 6자리 코드는 코스피·코스닥을 찾아 붙여 줌), 보유로
   $('#wl-input').value = b.dataset.kisAdd; $('#wl-kind').value = 'hold';
   $('#wl-form').requestSubmit();
-  setTimeout(renderKis, 1500);
 });
 function renderWatch() {
   renderWlMode();
+  renderKis();
   const list = $('#wl-list');
   const cur = (state.ticker || '').trim().toUpperCase();
   renderThemes();

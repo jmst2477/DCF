@@ -147,18 +147,24 @@ button.ghost{background:var(--ln);color:var(--tx)}button.red{background:var(--rd
 .row:first-of-type{border-top:0}.btns{display:flex;gap:6px;flex-shrink:0}
 .log{font-size:13px;color:var(--mu);margin:2px 0}
 .tag{font-size:12px;padding:1px 6px;border-radius:6px;background:var(--ln);color:var(--tx)}
+.up{color:var(--rd)}.dn{color:var(--bl)}
+.num{text-align:right;flex-shrink:0;font-size:14px}.num div{font-size:12px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 12px}.top h1{margin:0}
+.state{font-size:13px;font-weight:600;padding:3px 8px;border-radius:999px;background:var(--ln)}.state.on{background:rgba(49,130,246,.15);color:var(--bl)}.state.off{background:rgba(240,68,82,.15);color:var(--rd)}
+h3{font-size:13px;color:var(--mu);margin:14px 0 2px;font-weight:600}h3:first-child{margin-top:0}
+.sum{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--mu);margin-top:6px}.sum b{color:var(--tx)}
+#app .card>.btns{flex-wrap:wrap}button{white-space:nowrap}
+details summary{cursor:pointer;color:var(--mu);font-size:13px;margin-top:8px}
 </style>
 <main>
-<h1>🤖 주식 에이전트</h1>
+<div class="top"><h1>🤖 주식 에이전트</h1><span id="state" class="state" hidden></span></div>
 ${!ready ? `<div class="card"><h2>아직 준비 중</h2><p class="mu">Vercel 환경 변수에 ${[!cfg.key && "KIS_APP_KEY", !cfg.secret && "KIS_APP_SECRET", !cfg.accountOk && "KIS_ACCOUNT(12345678-01 꼴)", !hasPw && "AGENT_PASSWORD"].filter(Boolean).join(", ") || "서버 저장소"} 를 넣고 다시 배포하면 켜집니다.</p></div>` : `
 <div class="card" id="login"><h2>비밀번호</h2><form id="f"><input id="pw" type="password" autocomplete="current-password" placeholder="에이전트 비밀번호"><p></p><button>열기</button></form><p id="lmsg" class="mu"></p></div>
 <div id="app" hidden>
 <div class="card"><h2>매수 승인</h2><div id="appr"></div></div>
-<div class="card"><h2>에이전트가 가진 종목</h2><div id="pos"></div></div>
-<div class="card"><h2>오늘 밤 주문</h2><div id="plan"></div></div>
-<div class="card"><h2>🇰🇷 국내 주식</h2><div id="kr"></div><p></p><div class="btns"><button id="krclose" class="ghost">지금 국내 종가 확인</button></div><p id="krmsg" class="mu"></p></div>
-<div class="card"><h2>한투에 걸린 주문</h2><div id="broker"><p class="mu">불러오는 중…</p></div></div>
-<div class="card"><h2>이번 달</h2><div id="month"></div><p></p><div class="btns"><button id="pause" class="ghost"></button><button id="close" class="ghost">지금 종가 확인</button></div><p id="amsg" class="mu"></p></div>
+<div class="card"><h2>💼 내 계좌 <span class="mu">한투 잔고 · 직접 산 종목 포함</span></h2><div id="hold"><p class="mu">불러오는 중…</p></div></div>
+<div class="card"><h2>주문</h2><h3>🇺🇸 오늘 밤 청산</h3><div id="plan"></div><h3>🇰🇷 국내 청산 · 오늘 주문</h3><div id="kr"></div><h3>한투에 걸린 주문</h3><div id="broker"><p class="mu">불러오는 중…</p></div></div>
+<div class="card"><h2>이번 달</h2><div id="month"></div><p></p><div class="btns"><button id="pause" class="ghost"></button><button id="close" class="ghost">미국 종가 확인</button><button id="krclose" class="ghost">국내 종가 확인</button></div><p id="amsg" class="mu"></p><p id="krmsg" class="mu"></p></div>
 <div class="card"><h2>기록</h2><div id="log"></div></div>
 </div>`}
 </main>
@@ -169,32 +175,58 @@ async function call(action,extra){const r=await fetch('/api/agent',{method:'POST
 const ST={pending:'승인 대기',approved:'승인됨 · 11시대 주문',sent:'주문 보냄',sending:'주문 보내는 중',rejected:'거절',expired:'시간 지남',failed:'주문 실패',swapping:'갈아타기 · 파는 중, 체결되면 삼',canceled:'취소함',unfilled:'안 채워짐'};
 const won=v=>Math.round(v).toLocaleString('ko-KR')+'원',pr=(a,v)=>a.kr?won(v):'$'+v.toFixed(2);
 const t2=s=>new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+const apprRow=a=>'<div class="row"><div><b>'+esc(a.t)+'</b> '+(a.kr?'<span class="tag">🇰🇷 국내</span> ':'')+(a.auto?'<span class="tag">🤖 자동</span> ':'')+(a.outside?'<span class="tag">관심 목록 밖</span> ':'')+'<span class="mu">'+esc(a.name)+'</span>'+(a.stat?'<div class="mu">5년 승률 '+Math.round(a.stat.rate*100)+'% ('+a.stat.n+'번)'+(a.stat.y1!=null?' · 최근 1년 '+(a.stat.y1>0?'+':'')+Math.round(a.stat.y1*100)+'%':'')+'</div>':'')+(a.swap?'<div class="mu">🔁 갈아타기: <b>'+esc(a.swap.t)+'</b> '+a.swap.qty+'주 팔고 이 종목 사기 · 점수 '+a.swap.score.score+' → '+(a.score?a.score.score:'?')+'</div>':'')+'<div class="mu">'+esc(a.sig)+' 종가 '+pr(a,a.close)+' → 지정가 '+pr(a,a.limit)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(a.kr&&a.status==='approved'?'승인됨 · 08:00 장전 또는 08:40 주문':a.kr&&a.status==='sent'&&a.ex==='NXT'?'넥스트레이드 장전 주문 보냄':ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'"'+(a.swap?' data-swap="'+esc(a.swap.t)+'"':'')+'>승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':a.status==='approved'?'<div class="btns"><button class="ghost" data-no="'+a.id+'" data-ask="1">취소</button></div>':'')+'</div>';
+const ACTIVE={pending:1,approved:1,sending:1,swapping:1};
+const sg=v=>v>=0?'+':'−',pctx=r=>sg(r)+(Math.abs(r)*100).toFixed(1)+'%';
+let LAST=null,HOLD=null;
 function render(s){
+  LAST=s;
   const L0=s.limits;
-  const ap=s.appr||[];
-  $('#appr').innerHTML=ap.length?ap.map(a=>'<div class="row"><div><b>'+esc(a.t)+'</b> '+(a.kr?'<span class="tag">🇰🇷 국내</span> ':'')+(a.auto?'<span class="tag">🤖 자동</span> ':'')+(a.outside?'<span class="tag">관심 목록 밖</span> ':'')+'<span class="mu">'+esc(a.name)+'</span>'+(a.stat?'<div class="mu">5년 승률 '+Math.round(a.stat.rate*100)+'% ('+a.stat.n+'번)'+(a.stat.y1!=null?' · 최근 1년 '+(a.stat.y1>0?'+':'')+Math.round(a.stat.y1*100)+'%':'')+'</div>':'')+(a.swap?'<div class="mu">🔁 갈아타기: <b>'+esc(a.swap.t)+'</b> '+a.swap.qty+'주 팔고 이 종목 사기 · 점수 '+a.swap.score.score+' → '+(a.score?a.score.score:'?')+'</div>':'')+'<div class="mu">'+esc(a.sig)+' 종가 '+pr(a,a.close)+' → 지정가 '+pr(a,a.limit)+(a.qty?' × '+a.qty+'주':a.est?' × 약 '+a.est+'주':'')+'</div>'+(a.news?'<div class="mu">📰 '+esc(a.news)+'</div>':'')+'<div class="mu">'+(a.kr&&a.status==='approved'?'승인됨 · 08:00 장전 또는 08:40 주문':a.kr&&a.status==='sent'&&a.ex==='NXT'?'넥스트레이드 장전 주문 보냄':ST[a.status]||esc(a.status))+(a.status==='pending'?' · 마감 '+t2(a.deadline):'')+(a.error?' · '+esc(a.error):'')+(a.note?' · '+esc(a.note):'')+'</div></div>'+(a.status==='pending'?'<div class="btns"><button data-ok="'+a.id+'"'+(a.swap?' data-swap="'+esc(a.swap.t)+'"':'')+'>승인</button><button class="ghost" data-no="'+a.id+'">거절</button></div>':a.status==='approved'?'<div class="btns"><button class="ghost" data-no="'+a.id+'" data-ask="1">취소</button></div>':'')+'</div>').join(''):'<p class="mu">승인할 매수가 없습니다.</p>';
-  const ps=Object.entries(s.pos||{});
-  $('#pos').innerHTML=ps.length?ps.map(([t,p])=>'<div class="row"><div><b>'+esc(t)+'</b> '+p.qty+'주 · 평균 $'+p.avg.toFixed(2)+'<div class="mu">'+esc(p.since)+'부터'+(p.rule&&(p.rule.sl||p.rule.tp)?' · 손절 '+(p.rule.sl||'-')+'% 익절 '+(p.rule.tp||'-')+'%':'')+'</div></div></div>').join(''):'<p class="mu">없습니다. (직접 산 주식은 건드리지 않습니다)</p>';
-  // 국내 (원화)
-  const k=s.kr||{},kp=Object.entries(k.pos||{}),kpl=k.plan&&k.plan.exits||[],ko=(k.orders||[]).filter(o=>o.status==='sent'||o.status==='partial'),km=k.month;
-  $('#kr').innerHTML=(kp.length?kp.map(([t,p])=>'<div class="row"><div><b>'+esc(t)+'</b> '+p.qty+'주 · 평균 '+won(p.avg)+'<div class="mu">'+esc(p.since)+'부터'+(p.rule&&(p.rule.sl||p.rule.tp)?' · 손절 '+(p.rule.sl||'-')+'% 익절 '+(p.rule.tp||'-')+'%':'')+'</div></div></div>').join(''):'<p class="mu">가진 국내 종목이 없습니다.</p>')
-    +(kpl.length?'<p></p>'+kpl.map(x=>'<div class="log">'+(x.price?'익절 대기 지정가 '+won(x.price):'장 시작 시장가 매도')+' · '+esc(x.t)+' '+x.qty+'주 · '+esc(x.why)+(k.plan.sent?' (보냄)':' (08:40 에 보냄)')+'</div>').join(''):'')
-    +ko.map(o=>'<div class="row"><div><b>'+esc(o.t)+'</b> '+(o.side==='buy'?'매수':'매도')+' '+o.qty+'주 '+(o.price?won(o.price):'시장가')+'<div class="mu">오늘 주문 · '+esc(o.why||'')+(o.filled?' · '+o.filled+'주 체결':'')+'</div></div><div class="btns"><button class="ghost" data-cancel="'+esc(o.no)+'">취소</button></div></div>').join('')
-    +(km?'<div class="mu">이번 달 국내 실현 손익 '+won(km.realized||0)+' · 월초 국내 계좌 '+won(km.base)+' · 손실이 '+L0.monthLoss+'% 넘으면 새 국내 매수 멈춤</div>':'');
+  const ap=s.appr||[],act=ap.filter(a=>ACTIVE[a.status]),past=ap.filter(a=>!ACTIVE[a.status]);
+  $('#appr').innerHTML=(act.length?act.map(apprRow).join(''):'<p class="mu">승인할 매수가 없습니다.</p>')
+    +(past.length?'<details><summary>지난 요청 '+past.length+'개</summary>'+past.map(apprRow).join('')+'</details>':'');
+  renderHold();
+  // 국내 (원화): 청산 예정 + 오늘 주문
+  const k=s.kr||{},kpl=k.plan&&k.plan.exits||[],ko=(k.orders||[]).filter(o=>o.status==='sent'||o.status==='partial'),km=k.month;
+  $('#kr').innerHTML=(kpl.map(x=>'<div class="log">'+(x.price?'익절 대기 지정가 '+won(x.price):'장 시작 시장가 매도')+' · '+esc(x.t)+' '+x.qty+'주 · '+esc(x.why)+(k.plan.sent?' (보냄)':' (08:40 에 보냄)')+'</div>').join('')
+    +ko.map(o=>'<div class="row"><div><b>'+esc(o.t)+'</b> '+(o.side==='buy'?'매수':'매도')+' '+o.qty+'주 '+(o.price?won(o.price):'시장가')+'<div class="mu">오늘 주문 · '+esc(o.why||'')+(o.filled?' · '+o.filled+'주 체결':'')+'</div></div><div class="btns"><button class="ghost" data-cancel="'+esc(o.no)+'">취소</button></div></div>').join(''))||'<p class="mu">없습니다.</p>';
   const pl=s.plan&&s.plan.exits||[];
   $('#plan').innerHTML=pl.length?pl.map(x=>'<div class="log">'+(x.price?'익절 대기 지정가 $'+x.price:'장 시작 시장가 매도')+' · '+esc(x.t)+' '+x.qty+'주 · '+esc(x.why)+(s.plan.sent?' (보냄)':'')+'</div>').join(''):'<p class="mu">청산할 것이 없습니다.</p>';
   const m=s.month,L=s.limits;
-  $('#month').innerHTML=m?'<div>실현 손익 <b class="'+(m.realized<0?'neg':'pos')+'">$'+(m.realized||0).toFixed(2)+'</b>'+(m.realizedSrc?' <span class="mu">(한투 기준)</span>':'')+'</div>'+(m.kisAll!=null?'<div class="mu">계좌 전체 이번 달 실현 손익(직접 매매 포함) $'+m.kisAll.toFixed(2)+'</div>':'')+'<div class="mu">월초 계좌 $'+Math.round(m.base).toLocaleString()+' · 손실이 '+L.monthLoss+'% 넘으면 새 매수 멈춤</div>'+(m.cashErr?'<div class="mu neg">달러 잔고 조회 실패: '+esc(m.cashErr)+'</div>':(m.base>0?'':'<div class="mu neg">계좌에 달러가 없어요. 매수하려면 달러로 환전해 두세요.</div>')):'<p class="mu">첫 종가 확인 뒤에 보입니다.</p>';
-  $('#month').innerHTML+='<div class="mu">매수 1건 '+(L.buyKrw/1e4).toLocaleString()+'만원 · 하루 '+L.maxBuys+'건까지 · 지정가 = 종가 +'+L.slip+'%</div>';
+  $('#month').innerHTML='<h3>🇺🇸 미국</h3>'+(m?'<div>실현 손익 <b class="'+(m.realized<0?'dn':'up')+'">'+sg(m.realized||0)+'$'+Math.abs(m.realized||0).toFixed(2)+'</b>'+(m.realizedSrc?' <span class="mu">(한투 기준)</span>':'')+'</div>'+(m.kisAll!=null?'<div class="mu">계좌 전체 이번 달 실현 손익(직접 매매 포함) $'+m.kisAll.toFixed(2)+'</div>':'')+'<div class="mu">월초 계좌 $'+Math.round(m.base).toLocaleString()+' · 손실이 '+L.monthLoss+'% 넘으면 새 매수 멈춤</div>'+(m.cashErr?'<div class="mu neg">달러 잔고 조회 실패: '+esc(m.cashErr)+'</div>':(m.base>0?'':'<div class="mu neg">계좌에 달러가 없어요. 매수하려면 달러로 환전해 두세요.</div>')):'<p class="mu">첫 종가 확인 뒤에 보입니다.</p>')
+    +'<h3>🇰🇷 국내</h3>'+(km?'<div>실현 손익 <b class="'+((km.realized||0)<0?'dn':'up')+'">'+sg(km.realized||0)+won(Math.abs(km.realized||0))+'</b></div><div class="mu">월초 국내 계좌 '+won(km.base)+' · 손실이 '+L0.monthLoss+'% 넘으면 새 국내 매수 멈춤</div>':'<p class="mu">첫 국내 종가 확인 뒤에 보입니다.</p>')
+    +'<h3>규칙</h3><div class="mu">매수 1건 '+(L.buyKrw/1e4).toLocaleString()+'만원 · 하루 '+L.maxBuys+'건까지 · 지정가 = 종가 +'+L.slip+'% · 청산·손절·익절은 자동</div>';
   $('#pause').textContent=s.paused?'▶ 다시 켜기':'⏸ 멈추기';$('#pause').className=s.paused?'':'ghost';
-  $('#log').innerHTML=(s.log||[]).map(l=>'<div class="log">'+t2(l.at)+' · '+esc(l.text)+'</div>').join('')||'<p class="mu">아직 없습니다.</p>';
+  const st=$('#state');st.hidden=false;st.textContent=s.paused?'⏸ 멈춤':'● 켜짐';st.className='state '+(s.paused?'off':'on');
+  const lg=s.log||[],lr=l=>'<div class="log">'+t2(l.at)+' · '+esc(l.text)+'</div>';
+  $('#log').innerHTML=(lg.slice(0,10).map(lr).join('')||'<p class="mu">아직 없습니다.</p>')+(lg.length>10?'<details><summary>더 보기 '+(lg.length-10)+'개</summary>'+lg.slice(10).map(lr).join('')+'</details>':'');
+}
+// 한투 잔고 (직접 산 종목 포함). 에이전트가 산 종목은 🤖 표시와 손절·익절. 사이트 관심 목록에도 보이게 이 브라우저에 저장
+function renderHold(){
+  const s=LAST||{},h=HOLD,box=$('#hold');
+  if(!h)return;
+  if(h.error){box.innerHTML='<p class="mu neg">'+esc(h.error)+'</p>';return}
+  const ap=s.pos||{},kp=(s.kr&&s.kr.pos)||{};
+  const agKr=c=>{const x=Object.keys(kp).find(t=>String(t).slice(0,6)===c);return x?kp[x]:null};
+  const row=(kr,x,a)=>{const ok=x.avg>0&&x.price>0,pl=ok?(x.price-x.avg)*x.qty:0,r=ok?x.price/x.avg-1:0;
+    return '<div class="row"><div><b>'+esc(kr?(x.name||x.t):x.t)+'</b> '+(kr&&x.name?'<span class="mu">'+esc(x.t)+'</span> ':'')+(a?'<span class="tag">🤖 에이전트</span>':'')
+      +'<div class="mu">'+x.qty+'주 · 평단 '+pr({kr},x.avg)+(ok?' · 지금 '+pr({kr},x.price):'')+(a&&a.rule&&(a.rule.sl||a.rule.tp)?' · 손절 '+(a.rule.sl||'-')+'% 익절 '+(a.rule.tp||'-')+'%':'')+'</div></div>'
+      +(ok?'<div class="num '+(pl>=0?'up':'dn')+'"><b>'+sg(pl)+pr({kr},Math.abs(pl))+'</b><div>'+pctx(r)+'</div></div>':'')+'</div>'};
+  const part=(kr,list,cash,ag)=>{const v=list.reduce((t,x)=>t+(x.avg>0&&x.price>0?(x.price-x.avg)*x.qty:0),0),c=list.reduce((t,x)=>t+x.avg*x.qty,0);
+    return list.map(x=>row(kr,x,ag(x))).join('')+(list.length||cash!=null?'<div class="sum">'+(list.length?'<span>평가 손익 <b class="'+(v>=0?'up':'dn')+'">'+sg(v)+pr({kr},Math.abs(v))+(c>0?' ('+pctx(v/c)+')':'')+'</b></span>':'')+(cash!=null?'<span>'+(kr?'원화':'달러')+' 예수금 <b>'+pr({kr},Number(cash))+'</b></span>':'')+'</div>':'')};
+  const us=h.us||[],kr=h.kr||[];
+  box.innerHTML=(us.length||h.usd!=null?'<h3>🇺🇸 미국</h3>'+part(false,us,h.usd,x=>ap[x.t]):'')
+    +(kr.length||h.krw!=null?'<h3>🇰🇷 국내</h3>'+part(true,kr,h.krw,x=>agKr(x.t)):'')
+    +(!us.length&&!kr.length?'<p class="mu">가진 종목이 없습니다.</p>':'')
+    +((h.errors||[]).length?'<p class="mu neg">'+esc(h.errors.join(' / '))+'</p>':'')
+    +'<p class="mu">'+t2(h.at)+' 기준 · 사이트 관심 목록에도 수량·평단·수익이 보입니다.</p>';
 }
 function renderBroker(b){
   const rows=(b.resv||[]).map(x=>'<div class="row"><div><b>'+esc(x.t)+'</b> '+(x.side==='buy'?'매수':'매도')+' '+x.qty+'주 '+(x.price?'$'+x.price.toFixed(2):'시장가')+'<div class="mu">예약 · '+esc(x.state||'접수')+(x.reason?' · <span class="neg">'+esc(x.reason)+'</span>':'')+(x.mine?' · 에이전트 주문':' · 직접 넣은 주문')+'</div></div>'+(x.mine?'<div class="btns"><button class="ghost" data-cancel="'+esc(x.no)+'">취소</button></div>':'')+'</div>')
     .concat((b.unfilled||[]).map(x=>'<div class="row"><div><b>'+esc(x.t)+'</b> '+(x.side==='buy'?'매수':'매도')+' 미체결 '+x.left+'/'+x.qty+'주 $'+x.price.toFixed(2)+'<div class="mu">장중 주문 · 한투 앱에서 정리</div></div></div>'));
   $('#broker').innerHTML=(rows.join('')||'<p class="mu">걸린 주문이 없습니다.</p>')+((b.errors||[]).length?'<p class="mu neg">'+esc(b.errors.join(' / '))+'</p>':'');
 }
-async function refresh(){render(await call('status'));call('broker').then(renderBroker).catch(e=>{$('#broker').innerHTML='<p class="mu neg">'+esc(e.message)+'</p>'})}
+async function refresh(){render(await call('status'));call('broker').then(renderBroker).catch(e=>{$('#broker').innerHTML='<p class="mu neg">'+esc(e.message)+'</p>'});call('holdings').then(h=>{HOLD=h;try{localStorage.setItem('dcf-kis-hold',JSON.stringify(h))}catch(e){}renderHold()}).catch(e=>{HOLD={error:e.message};renderHold()})}
 const f=$('#f');
 if(f)f.addEventListener('submit',async e=>{e.preventDefault();PW=$('#pw').value;try{await refresh();$('#login').hidden=true;$('#app').hidden=false}catch(err){$('#lmsg').textContent=err.message}});
 document.addEventListener('click',async e=>{
