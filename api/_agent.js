@@ -24,6 +24,47 @@ export const SCAN = { rate: 0.65, n: 5, max: 5 };
 const pct = v => (v > 0 ? "+" : "") + (Math.abs(v) < 0.1 ? (v * 100).toFixed(1) : Math.round(v * 100)) + "%";
 const statTxt = s => (s ? `5년 승률 ${Math.round(s.rate * 100)}% (${s.n}번)${s.y1 != null ? ` · 최근 1년 ${pct(s.y1)}` : " · 최근 1년 거래 없음"}` : "");
 
+// 갈아타기: 돈이 모자란 매수 신호가 생기면, 갖고 있는 종목 중 점수가 가장 낮은 것을 팔고 사자고 묻는다 (언제나 승인)
+//   새 종목 점수가 15점 이상 높을 때만, 산 지 7일(달력) 안 된 종목·익절가 3% 안쪽 종목·오늘 팔 종목은 안 판다
+//   달러 종목은 달러 종목끼리, 원화 종목은 원화 종목끼리만 (환전해서 다른 시장 종목을 사지 않음)
+export const SWAP = { gap: 15, minDays: 7, nearTp: 0.97 };
+const clamp01 = v => Math.max(0, Math.min(1, v));
+const sma200 = c => { if (!c || c.length < 200) return null; let s = 0; for (let k = c.length - 200; k < c.length; k++) s += c[k]; return s / 200; };
+const ret63 = c => (c && c.length > 63 ? c[c.length - 1] / c[c.length - 64] - 1 : 0);
+// 점수 100점 = 신호 성적 60 (5년 승률 25 · 최근 1년 수익 20 · 거래 횟수 15) + 흐름 25 (200일선 위 10 · 3개월 시장 대비 8 · 섹터 7) + 뉴스 15 (악재면 깎임)
+export function swapScore({ stat, d, bench, secRank, secN, news }) {
+  const p = {};
+  p.win = stat ? clamp01((stat.rate - 0.5) / 0.4) * 25 : 0;
+  p.y1 = !stat ? 0 : stat.y1 == null ? 5 : clamp01((stat.y1 + 0.1) / 0.4) * 20;
+  p.n = stat ? (Math.min(stat.n, 20) / 20) * 15 : 0;
+  const c = d.close, m = sma200(c);
+  p.trend = m != null && c[c.length - 1] > m ? 10 : 0;
+  p.rs = bench && bench.close ? clamp01((ret63(c) - ret63(bench.close) + 0.1) / 0.2) * 8 : 4;
+  p.sector = secRank == null ? 3.5 : secRank < 3 ? 7 : secRank >= secN - 2 ? 0 : 4;
+  p.news = newsBlocks(news) ? 0 : news && (news.sentiment === "악재" || news.action === "보유 점검") ? 5 : 15;
+  const sig = Math.round(p.win + p.y1 + p.n), flow = Math.round(p.trend + p.rs + p.sector), nw = Math.round(p.news);
+  return { score: sig + flow + nw, sig, flow, news: nw };
+}
+// cands: [{ cost, score }] (돈이 들 매수), holds: [{ t, qty, close, score, since, nearTp, selling }], free: 지금 쓸 수 있는 돈
+// 돈이 되는 매수는 그대로 두고, 모자란 매수에만 c.swap = 팔 종목 / c.short = 바꿀 종목도 없음
+export function planSwaps(cands, holds, free, today) {
+  let left = free;
+  const used = new Set();
+  for (const c of [...cands].sort((x, y) => y.score - x.score)) {
+    if (!(c.cost > 0)) continue;
+    if (c.cost <= left) { left -= c.cost; continue; }
+    const ok = holds.filter(h => !used.has(h.t) && !h.selling && !h.nearTp && !(h.since > addDays(today, -SWAP.minDays))
+      && h.score + SWAP.gap <= c.score && h.close * h.qty + left >= c.cost).sort((x, y) => x.score - y.score);
+    if (!ok.length) { c.short = true; continue; }
+    const h = ok[0];
+    used.add(h.t);
+    left += h.close * h.qty - c.cost;
+    c.swap = h;
+  }
+  return cands;
+}
+const scoreTxt = s => (s ? `${s.score}점 (신호 ${s.sig} · 흐름 ${s.flow} · 뉴스 ${s.news})` : "");
+
 export const LIMITS = env => ({
   buyKrw: Number(env.AGENT_BUY_KRW) > 0 ? Number(env.AGENT_BUY_KRW) : 5000000,
   maxBuys: Number(env.AGENT_MAX_BUYS) > 0 ? Number(env.AGENT_MAX_BUYS) : 3,
@@ -73,7 +114,7 @@ export function makeAgent(deps) {
     await store.set(K.log, l.slice(0, 100));
   }
   // 국내 주식은 api/_agentkr.js (승인 목록·멈춤·기록은 같이 씀)
-  const kr = makeKrAgent({ ...deps, L, autoOk, log, statTxt, sendChunks, K });
+  const kr = makeKrAgent({ ...deps, L, autoOk, log, statTxt, sendChunks, K, swapScore, planSwaps, scoreTxt, SWAP });
 
   // 체결 내역을 에이전트 주문과 맞춰 보유 수량·평균가·실현 손익을 고친다
   async function reconcile() {
@@ -210,6 +251,17 @@ export function makeAgent(deps) {
     const W = { byT: Object.fromEntries(items.map(x => [x.t, x])) };
     const exits = [], buys = [], errors = [];
     let date = null;
+    // 갈아타기 점수 재료: S&P500(SPY), 리서치 보고서의 섹터 순위(사흘 안), 뉴스
+    let bench = null;
+    try { bench = await bars("SPY"); } catch { /* 없으면 시장 대비 점수는 가운데 값 */ }
+    const secInfo = await store.get("dcf:sectors");
+    const secOk = secInfo && secInfo.rank && now().getTime() - Date.parse(secInfo.at) < 3 * 864e5;
+    const secRankOf = t => { const s = secOk && secInfo.tick ? secInfo.tick[t] : null; return s != null && secInfo.rank[s] != null ? secInfo.rank[s] : null; };
+    const news = await store.get("dcf:news");
+    const newsOk = news && news.tickers && now().getTime() - Date.parse(news.at) < 30 * 3600e3;
+    const newsOf = t => (newsOk ? news.tickers.find(x => x.t === t) : null);
+    const scoreOf = (t, stat, d) => swapScore({ stat, d, bench, secRank: secRankOf(t), secN: secOk ? secInfo.n : 0, news: newsOf(t) });
+    const holds = [];
 
     // 1) 에이전트가 가진 종목: 청산 신호·손절·익절 확인
     for (const [t, p] of Object.entries(pos)) {
@@ -240,16 +292,22 @@ export function makeAgent(deps) {
         else if (sig && sig.exit && sig.exit[i]) why = "청산 신호";
         if (why) exits.push({ t, exch, qty: p.qty, price: 0, why });
         else if (tp) exits.push({ t, exch, qty: p.qty, price: tp, why: "익절 대기" });
+        // 갈아타기 후보: 지금 ★ 신호가 있는 종목만 점수를 매긴다 (★를 지운 종목은 판단할 근거가 없어 안 팖)
+        if (strat && !why) {
+          try {
+            const sim = simulate(d, strat, rule, TA, { fee });
+            const s5 = tradeStats(d, sim, 5), s1 = tradeStats(d, sim, 1);
+            const stat = s5 ? { rate: s5.rate, n: s5.n, y1: s1 ? s1.total : null } : null;
+            holds.push({ t, qty: p.qty, exch, close: d.close[i], since: p.since, nearTp: !!(tp && d.close[i] >= tp * SWAP.nearTp), stat, name: strat.name, ...scoreOf(t, stat, d) });
+          } catch { /* 점수 못 매기면 안 팖 */ }
+        }
       } catch (e) { errors.push(`${t}: ${e.message || e}`); }
     }
 
     // 2) ★ 종목의 새 매수 신호
     const appr = (await get(K.appr, [])).filter(a => !a.kr && (a.status === "pending" || a.status === "approved"));
     const ordersOpen = (await get(K.orders, [])).filter(o => o.side === "buy" && (o.status === "sent" || o.status === "partial"));
-    // 뉴스 분석 (하루 안): 중요한 악재가 있으면 매수 승인 요청을 만들지 않는다
-    const news = await store.get("dcf:news");
-    const newsOk = news && news.tickers && now().getTime() - Date.parse(news.at) < 30 * 3600e3;
-    const newsOf = t => (newsOk ? news.tickers.find(x => x.t === t) : null);
+    // 뉴스 분석 (하루 안): 중요한 악재가 있으면 매수 승인 요청을 만들지 않는다 (newsOf 는 위에서)
     const busy = t => pos[t] || appr.some(a => a.t === t) || ordersOpen.some(o => o.t === t);
     // 오늘 신호로 이미 승인·주문된 매수도 하루 한도에 센다
     const taken = (await get(K.appr, [])).filter(a => !a.kr && a.sig === today && (a.status === "approved" || a.status === "sent")).length;
@@ -267,15 +325,15 @@ export function makeAgent(deps) {
         // 사이트와 같은 성적 (내 수수료 설정, 지난 5년·최근 1년)
         const s5 = tradeStats(d, sim, 5), s1 = tradeStats(d, sim, 1);
         const stat = s5 ? { rate: s5.rate, n: s5.n, y1: s1 ? s1.total : null } : null;
-        buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], exch, skip: why, stat, auto: !!it.star && autoOk(stat) });
+        buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], exch, skip: why, stat, auto: !!it.star && autoOk(stat), sc: why ? null : scoreOf(it.t, stat, d) });
       } catch (e) { errors.push(`${it.t}: ${e.message || e}`); }
     }
-    const created = [];
-    let usdUsed = 0;
+    const created = [], cands = [];
+    let usdUsed = 0, usdFree = null;
     for (const b of buys.filter(b => !b.skip)) {
       const limit = r2(b.close * (1 + L.slip / 100));
       let est = null, bp = null;
-      try { bp = await kis.buyingPower(b.exch, b.t, limit); if (bp.rate > 0) est = Math.floor(L.buyKrw / bp.rate / limit); } catch { /* 승인 때 다시 계산 */ }
+      try { bp = await kis.buyingPower(b.exch, b.t, limit); if (bp.rate > 0) est = Math.floor(L.buyKrw / bp.rate / limit); if (usdFree == null && bp.usd >= 0) usdFree = Number(bp.usd); } catch { /* 승인 때 다시 계산 */ }
       const nw = newsOf(b.t);
       const a = { id: crypto.randomBytes(6).toString("hex"), t: b.t, sid: b.sid, rule: b.rule, name: b.name, news: nw ? `${nw.sentiment} · ${nw.summary}` : null, exch: b.exch, sig: today, close: b.close, limit, est,
         stat: b.stat, status: "pending", created: now().toISOString(), deadline: approvalDeadline(now()) };
@@ -291,7 +349,20 @@ export function makeAgent(deps) {
           if (closed) a.note = `오늘 밤 미국 휴장(${closed}) — 다음 장 날 보냄`;
         }
       }
+      if (b.sc) a.score = b.sc;
+      if (a.status === "pending" && b.sc) cands.push({ a, cost: (est || 0) * limit, score: b.sc.score });
       created.push(a);
+    }
+    // 달러가 모자란 매수 → 점수가 15점 이상 낮은 달러 보유 종목과 갈아타기를 묻는다
+    if (usdFree != null && cands.length) {
+      planSwaps(cands, holds, Math.max(0, usdFree - usdUsed), today);
+      for (const c of cands) {
+        if (c.swap) {
+          const h = c.swap;
+          c.a.swap = { t: h.t, qty: h.qty, exch: h.exch, close: h.close, name: h.name, stat: h.stat, score: { score: h.score, sig: h.sig, flow: h.flow, news: h.news } };
+          c.a.note = `달러가 모자라 ${h.t}(${h.score}점)를 팔고 사는 갈아타기`;
+        } else if (c.short && !c.a.note) c.a.note = `달러 부족 · 바꿔 팔 종목 없음 (${SWAP.gap}점 이상 낮은 보유 종목이 없음)`;
+      }
     }
     const all = (await get(K.appr, [])).map(a => (a.status === "pending" && a.deadline < now().toISOString() ? { ...a, status: "expired" } : a));
     await store.set(K.appr, all.concat(created).slice(-100));
@@ -302,7 +373,8 @@ export function makeAgent(deps) {
     // 카톡
     const lines = notes.filter(n => n.startsWith("⚠") || n.includes("액면"));
     created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 $${a.limit} × ${a.qty}주 → 오늘 11시대 예약 주문${a.news ? `\n  뉴스: ${a.news}` : ""}\n  원치 않으면 에이전트 화면에서 '취소'`));
-    created.filter(a => !a.auto).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
+    created.filter(a => a.swap).forEach(a => lines.push(`🔁 갈아타기 승인 필요\n  ${a.swap.t} ${a.swap.qty}주 팔기 · ${scoreTxt(a.swap.score)}\n  → ${a.t} 사기 · ${scoreTxt(a.score)}\n  ${a.name}${a.stat ? ` · ${statTxt(a.stat)}` : ""}\n  승인하면 밤 장 시작에 ${a.swap.t} 시장가 매도 → 체결되면 ${a.t} 지정가 $${a.limit} 매수`));
+    created.filter(a => !a.auto && !a.swap).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 $${a.limit}${a.est ? ` × 약 ${a.est}주` : ""}${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 오늘 밤 장 시작에 자동 매도`));
     Object.keys(pos).forEach(t => { const n = newsOf(t); if (n && n.action === "보유 점검") lines.push(`⚠ ${t} 보유 중 뉴스 악재: ${n.summary} (자동 매도는 신호·손절대로)`); });
@@ -398,6 +470,24 @@ export function makeAgent(deps) {
     return r;
   }
 
+  // 갈아타기로 팔 종목에 걸린 다른 매도(익절 대기 지정가)는 빼고 취소한다. 같은 주식을 두 번 팔 수 없음
+  async function dropExits(t) {
+    const p = await get(K.plan, null);
+    if (p && !p.sent && p.exits.some(x => x.t === t)) await store.set(K.plan, { ...p, exits: p.exits.filter(x => x.t !== t) });
+    const orders = await get(K.orders, []);
+    let ch = false;
+    for (const o of orders.filter(o => o.t === t && o.side === "sell" && o.no && (o.status === "sent" || o.status === "partial") && !(o.filled > 0))) {
+      try { if (o.regular) await kis.cancelOrder(o.exch, o.t, o.no, o.qty); else await kis.cancelResv(o.rcit || ymd(kstDate(new Date(o.at))), o.no); o.status = "canceled"; ch = true; }
+      catch (e) { throw new Error(`${t} 에 걸린 매도 주문을 취소하지 못했습니다: ${e.message || e}`); }
+    }
+    if (ch) await store.set(K.orders, orders);
+  }
+  async function sellSwap(a) {
+    await dropExits(a.swap.t);
+    await submit({ side: "sell", t: a.swap.t, exch: a.swap.exch, qty: a.swap.qty, price: 0, sig: a.sig, why: `갈아타기 → ${a.t}`, swapId: a.id });
+    a.status = "swapping"; a.swapAt = now().toISOString();
+  }
+
   // ---------- 한국 11시대: 청산 + 승인된 매수 예약 주문 ----------
   async function openStep({ origin } = {}) {
     const done = [], errors = [];
@@ -405,8 +495,10 @@ export function makeAgent(deps) {
     const closed = usClosed(kstDate(now()));
     if (closed) { await log(`오늘 밤 미국 휴장(${closed}) — 주문을 다음 장으로 미룸`); return { done, errors, skipped: `휴장: ${closed}` }; }
     const p = await get(K.plan, null);
+    // 승인된 갈아타기로 팔 종목은 청산 계획에서 뺀다 (갈아타기 매도가 대신 나감)
+    const swapT = new Set((await get(K.appr, [])).filter(a => !a.kr && a.status === "approved" && a.swap).map(a => a.swap.t));
     if (p && !p.sent) {
-      for (const x of p.exits) {
+      for (const x of p.exits.filter(x => !(swapT.has(x.t) && x.price > 0))) {
         try {
           await submit({ side: "sell", t: x.t, exch: x.exch, qty: x.qty, price: x.price, sig: p.date, why: x.why });
           done.push(`${x.price ? "익절 대기 지정가" : "매도(장 시작 시장가)"} ${x.t} ${x.qty}주${x.price ? ` $${x.price}` : ""} · ${x.why}`);
@@ -416,6 +508,11 @@ export function makeAgent(deps) {
     }
     const appr = await get(K.appr, []);
     for (const a of appr.filter(a => !a.kr && a.status === "approved")) {
+      if (a.swap) {
+        try { await sellSwap(a); done.push(`갈아타기: ${a.swap.t} ${a.swap.qty}주 장 시작 시장가 매도 → 체결되면 ${a.t} 지정가 $${a.limit} 매수`); }
+        catch (e) { a.status = "failed"; a.error = String(e.message || e); errors.push(`갈아타기 ${a.swap.t}→${a.t} 실패: ${a.error}`); }
+        continue;
+      }
       try {
         await submit({ side: "buy", t: a.t, exch: a.exch, qty: a.qty, price: a.limit, sig: a.sig, sid: a.sid, rule: a.rule, why: "승인" });
         a.status = "sent";
@@ -425,6 +522,42 @@ export function makeAgent(deps) {
     await store.set(K.appr, appr);
     const msgs = done.concat(errors.map(e => "⚠ " + e));
     if (msgs.length && send) await sendChunks(send, `🤖 에이전트 주문 (오늘 밤 장 시작에 나감)`, msgs, "", origin);
+    for (const m of msgs) await log(m);
+    return { done, errors };
+  }
+
+  // ---------- 미국 장중 (한국 0시대): 갈아타기 매도가 체결됐으면 매수 ----------
+  async function swapStep({ origin } = {}) {
+    const list0 = (await get(K.appr, [])).filter(a => !a.kr && a.status === "swapping");
+    if (!list0.length) return { skipped: "갈아타기 없음", done: [], errors: [] };
+    const closed = usClosed(etDate(now()));
+    if (closed) return { skipped: `휴장: ${closed}`, done: [], errors: [] };
+    await reconcile();
+    const appr = await get(K.appr, []), orders = await get(K.orders, []), pos = await get(K.pos, {});
+    const done = [], errors = [];
+    for (const a of appr.filter(a => !a.kr && a.status === "swapping")) {
+      const o = orders.filter(x => x.swapId === a.id && x.side === "sell").pop();
+      const sold = o && (o.status === "filled" || ((o.filled || 0) > 0 && !pos[a.swap.t]));
+      const fail = m => { a.status = "failed"; a.error = m; errors.push(`갈아타기 ${a.swap.t}→${a.t}: ${m}`); };
+      if (!o || ["rejected", "canceled", "expired"].includes(o.status)) { fail(`${a.swap.t} 매도가 안 돼서 ${a.t} 는 안 샀습니다${o && o.reason ? ` (${o.reason})` : ""}`); continue; }
+      if (!sold) {
+        if (now().getTime() - Date.parse(a.swapAt || a.approvedAt) > 2 * 864e5) fail(`${a.swap.t} 매도가 이틀째 다 안 채워져서 ${a.t} 매수는 그만둠`);
+        continue;
+      }
+      try {
+        const bp = await kis.buyingPower(a.exch, a.t, a.limit);
+        const qty = Math.min(a.qty || 0, Math.floor(Number(bp.usd) / a.limit));
+        if (qty < 1) { fail(`${a.swap.t}는 팔렸지만 주문 가능 달러가 $${r2(Number(bp.usd) || 0)}라 ${a.t}를 못 샀습니다`); continue; }
+        const r = await kis.order("buy", a.exch, a.t, qty, a.limit);
+        orders.push({ side: "buy", t: a.t, exch: a.exch, qty, price: a.limit, sig: a.sig, sid: a.sid, rule: a.rule, why: `갈아타기 (${a.swap.t} 판 돈)`, no: r.no, regular: true, status: "sent", at: now().toISOString() });
+        a.status = "sent"; a.qty = qty;
+        done.push(`갈아타기: ${a.swap.t} 매도 체결 → ${a.t} ${qty}주 지정가 $${a.limit} 매수 주문 (오늘 장 안에서만 유효)`);
+      } catch (e) { fail(String(e.message || e)); }
+    }
+    await store.set(K.orders, orders.slice(-200));
+    await store.set(K.appr, appr);
+    const msgs = done.concat(errors.map(e => "⚠ " + e));
+    if (msgs.length && send) await sendChunks(send, `🔁 에이전트 갈아타기`, msgs, "", origin);
     for (const m of msgs) await log(m);
     return { done, errors };
   }
@@ -445,8 +578,9 @@ export function makeAgent(deps) {
     if (w === "settle") throw new Error("16:30~16:45 은 증권사 정산 시간이라 주문을 못 받습니다. 잠시 뒤에 다시 눌러 주세요.");
     const pos = await get(K.pos, {});
     if (pos[a.t]) throw new Error(`${a.t} 는 이미 에이전트가 가지고 있습니다.`);
-    const sameDay = appr.filter(x => !x.kr && x.sig === a.sig && ["approved", "sent"].includes(x.status)).length;
+    const sameDay = appr.filter(x => !x.kr && x.sig === a.sig && ["approved", "sent", "swapping"].includes(x.status)).length;
     if (sameDay >= L.maxBuys) throw new Error(`하루 매수 ${L.maxBuys}건 한도를 넘습니다.`);
+    if (a.swap) return approveSwap(a, appr, t, w);
     const bp = await kis.buyingPower(a.exch, a.t, a.limit);
     if (!(bp.rate > 0)) throw new Error("환율을 받지 못했습니다. 잠시 뒤 다시 해 주세요.");
     const qty = Math.floor(L.buyKrw / bp.rate / a.limit);
@@ -464,6 +598,27 @@ export function makeAgent(deps) {
     return { status: a.status, qty, cost: r2(cost), krw: Math.round(cost * bp.rate), note: a.note || null };
   }
 
+  // 갈아타기 승인: 팔 종목이 아직 있고, 판 돈 + 지금 달러로 살 수 있는지 확인 → 밤 장 시작 시장가 매도 예약
+  async function approveSwap(a, appr, t, w) {
+    const pos = await get(K.pos, {}), h = pos[a.swap.t];
+    if (!h || !(h.qty >= 1)) throw new Error(`${a.swap.t} 를 에이전트가 더는 갖고 있지 않아 갈아타기를 할 수 없습니다.`);
+    if (appr.some(x => x !== a && x.swap && x.swap.t === a.swap.t && ["approved", "swapping"].includes(x.status))) throw new Error(`${a.swap.t} 는 이미 다른 갈아타기로 팔기로 했습니다.`);
+    const bp = await kis.buyingPower(a.exch, a.t, a.limit);
+    if (!(bp.rate > 0)) throw new Error("환율을 받지 못했습니다. 잠시 뒤 다시 해 주세요.");
+    const qty = Math.floor(L.buyKrw / bp.rate / a.limit);
+    if (qty < 1) throw new Error(`1주 가격이 ${krw(L.buyKrw)}보다 비쌉니다.`);
+    const cost = qty * a.limit, proceeds = h.qty * a.swap.close * 0.97; // 장 시작가가 3% 낮아도 되게
+    if (cost > Number(bp.usd) + proceeds) throw new Error(`${a.swap.t}를 팔아도 달러가 모자랍니다 (필요 $${r2(cost)}, 지금 $${r2(Number(bp.usd))} + 판 돈 약 $${r2(proceeds)}).`);
+    a.qty = qty; a.rate = bp.rate; a.approvedAt = t.toISOString(); a.swap.qty = h.qty;
+    const closed = usClosed(kstDate(t));
+    if (w === "open" && !closed) await sellSwap(a);
+    else { a.status = "approved"; a.note = closed ? `오늘 밤 미국 휴장(${closed}) — 다음 장 날 매도부터` : `${a.swap.t} 매도 예약은 10시 이후에 보냄`; }
+    await store.set(K.appr, appr);
+    const msg = `갈아타기 승인: ${a.swap.t} ${h.qty}주를 밤 장 시작에 시장가로 팔고, 체결되면 ${a.t} ${qty}주를 지정가 $${a.limit}에 삽니다 (약 ${krw(cost * bp.rate)}).`;
+    await log(msg + (a.status === "swapping" ? " 매도 예약 보냄" : ` ${a.note}`));
+    return { status: a.status, qty, cost: r2(cost), krw: Math.round(cost * bp.rate), note: a.note || null, msg: a.status === "swapping" ? msg : msg + " " + a.note };
+  }
+
   async function status() {
     return {
       paused: !!(await store.get(K.paused)), limits: L,
@@ -478,12 +633,16 @@ export function makeAgent(deps) {
     const orders = await get(K.orders, []);
     const o = orders.find(x => x.no && x.no === no && (x.status === "sent" || x.status === "partial"));
     if (!o) { const r = await kr.cancel(no); if (r) return r; throw new Error("취소할 수 있는 에이전트 주문이 아닙니다."); }
-    await kis.cancelResv(o.rcit || ymd(kstDate(new Date(o.at))), o.no);
+    if (o.regular) await kis.cancelOrder(o.exch, o.t, o.no, o.qty - (o.filled || 0));
+    else await kis.cancelResv(o.rcit || ymd(kstDate(new Date(o.at))), o.no);
     o.status = "canceled";
     await store.set(K.orders, orders);
     if (o.side === "buy") {
       const appr = await get(K.appr, []);
       appr.forEach(a => { if (a.t === o.t && a.sig === o.sig && a.status === "sent") a.status = "canceled"; });
+    } else if (o.swapId) {
+      const appr = await get(K.appr, []);
+      appr.forEach(a => { if (a.id === o.swapId && a.status === "swapping") { a.status = "canceled"; a.note = `${o.t} 매도를 취소해서 갈아타기도 취소`; } });
       await store.set(K.appr, appr);
     }
     await log(`${o.t} ${o.side === "buy" ? "매수" : "매도"} 예약 주문 취소`);
@@ -499,7 +658,7 @@ export function makeAgent(deps) {
   }
   async function setPaused(v) { await store.set(K.paused, !!v); await log(v ? "에이전트 멈춤" : "에이전트 다시 켬"); }
 
-  return { closeStep, scanStep, openStep, approve, status, setPaused, reconcile, cancel, broker, note: log, krClose: kr.closeStep, krOpen: kr.openStep, krNxt: kr.nxtStep };
+  return { closeStep, scanStep, openStep, swapStep, approve, status, setPaused, reconcile, cancel, broker, note: log, krClose: kr.closeStep, krOpen: kr.openStep, krNxt: kr.nxtStep, krSwap: kr.swapStep };
 }
 
 // 카톡 한 통 200자 제한
