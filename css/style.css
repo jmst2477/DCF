@@ -458,3 +458,4 @@ body.drag-scrolling, body.drag-scrolling * { cursor: grabbing !important; user-s
 .deep-way { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
 .deep-way p { margin: 4px 0 8px; }
 .wl-msg { margin: 4px 0 0; } .wl-msg:empty { display: none; }
+.strat-pick .chip.more { --c: var(--muted); border-style: dashed; color: var(--muted); }
