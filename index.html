@@ -141,6 +141,8 @@
   <div class="modal-box" role="dialog" aria-modal="true" aria-label="차트">
     <aside class="wl">
       <form id="wl-form" class="wl-form"><select id="wl-src" title="어느 시장에서 찾을지: 해외 = 미국 티커, 국내 = 한글·영문 이름(예: SK, LG)이나 6자리 코드"><option value="us">🇺🇸 해외</option><option value="kr">🇰🇷 국내</option></select><input id="wl-input" list="wl-dl" placeholder="예: GEV, 삼성전자, 005930" title="미국은 티커, 국내 주식은 한글 이름이나 6자리 종목코드를 넣으세요. 여러 개는 띄어 쓰거나 쉼표로 한 번에 추가됩니다." autocomplete="off" autocapitalize="characters"><select id="wl-kind" title="보유 / 관심"><option value="watch">관심</option><option value="hold">보유</option></select><button type="submit" class="mini">추가</button></form><datalist id="wl-dl"></datalist><p id="wl-msg" class="muted small wl-msg"></p>
+      <div id="kis-box" class="kis-box small"><button type="button" class="chip" id="kis-btn" title="한국투자증권 계좌의 보유 수량·평단가를 불러와 목록에 표시합니다. 에이전트 비밀번호가 필요하고, 비밀번호는 저장하지 않습니다.">🏦 한투 잔고</button> <span id="kis-info" class="muted"></span>
+        <form id="kis-form" class="kis-form" hidden><input id="kis-pw" type="password" autocomplete="current-password" placeholder="에이전트 비밀번호"><button type="submit" class="mini">불러오기</button></form><div id="kis-miss" class="kis-miss"></div></div>
       <p class="wl-title muted small"><span>내 종목</span><button type="button" id="sync-btn" class="ghost mini" title="서버에 저장해 여러 브라우저·휴대폰을 자동으로 똑같이 맞춥니다">☁ 자동 동기화</button><button type="button" id="kakao-btn" class="ghost mini" title="적용한 신호가 새로 나오면 매일 아침 내 카카오톡으로 알려 줍니다">💬 카톡 알림</button><a href="/api/agent" target="_blank" rel="noopener" class="ghost mini btn-link" title="한투 계좌로 매수 승인·자동 청산하는 에이전트 화면">🤖 에이전트</a></p>
       <div id="kakao-box" class="xfer-box" hidden>
         <p id="kakao-msg" class="small"></p>

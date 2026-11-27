@@ -463,3 +463,9 @@ body.drag-scrolling, body.drag-scrolling * { cursor: grabbing !important; user-s
 .modal-info.popup:not([open]) { display: none; }
 .head-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .head-btns .chip { font-size: 13px; padding: 4px 11px; }
+/* 한투 잔고 */
+.kis-box { margin: 2px 0 6px; line-height: 1.9; }
+.kis-form { display: flex; gap: 6px; margin-top: 4px; }
+.kis-form input { flex: 1; min-width: 0; }
+.kis-miss .chip { margin: 2px 4px 0 0; }
+.wl-kis { font-size: 11px; color: var(--text); font-weight: 500; white-space: nowrap; }
