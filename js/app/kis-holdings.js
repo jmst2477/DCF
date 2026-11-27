@@ -18,18 +18,15 @@ const kisTxt = t => {
   return `🏦 ${h.qty}주 · 평단 ${kisMoney(kr, h.avg)}${pl != null ? ` · <span class="chg ${pl >= 0 ? 'up' : 'down'}" title="한투 현재가 ${kisMoney(kr, h.price)} 기준">${pl >= 0 ? '+' : '−'}${kisMoney(kr, Math.abs((h.price - h.avg) * h.qty))} (${pl >= 0 ? '+' : ''}${(pl * 100).toFixed(1)}%)</span>` : ''}`;
 };
 function renderKis() {
-  const box = $('#kis-box'), info = $('#kis-info'), miss = $('#kis-miss');
+  const box = $('#kis-box'), miss = $('#kis-miss');
   if (!box) return;
-  box.hidden = !kisHold;
-  if (!kisHold) { info.innerHTML = ''; miss.innerHTML = ''; return; }
-  const d = new Date(kisHold.at);
-  info.innerHTML = `🏦 한투 ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 기준 · <a href="/api/agent" target="_blank" rel="noopener" title="🤖 에이전트 화면에서 비밀번호를 넣으면 새 잔고로 바뀝니다">새로 고침</a>`
-    + ((kisHold.errors || []).length ? ` · <span class="down">${esc(kisHold.errors.join(' / '))}</span>` : '');
+  if (!kisHold) { box.hidden = true; miss.innerHTML = ''; return; }
   // 한투에 있는데 목록에 없는 종목 → 보유로 추가
   const codes = new Set(watch.map(t => String(t).slice(0, 6)));
   const out = (kisHold.us || []).filter(x => !watch.includes(x.t)).map(x => ({ k: x.t, label: x.t, qty: x.qty }))
     .concat((kisHold.kr || []).filter(x => !codes.has(x.t)).map(x => ({ k: x.t, label: x.name || x.t, qty: x.qty })));
   miss.innerHTML = out.length ? `<span class="muted">목록에 없는 보유 종목</span> ${out.map(x => `<button type="button" class="chip" data-kis-add="${esc(x.k)}" title="보유 종목으로 추가">＋ ${esc(x.label)} ${x.qty}주</button>`).join('')}${out.length > 1 ? `<button type="button" class="chip" data-kis-add="${esc(out.map(x => x.k).join(' '))}">＋ 모두 추가</button>` : ''}` : '';
+  box.hidden = !out.length; // 목록에 없는 보유 종목이 있을 때만 보임
 }
 // 에이전트 화면(다른 탭)에서 잔고를 새로 불러오면 바로 반영
 window.addEventListener('storage', e => {
