@@ -55,6 +55,12 @@ DCF 원작자 강의와 같은 계산입니다. 최근 매출에서 시작해 **
 - `js/strategy.js` 기본 매수·청산 신호와 차트 지표
 - `js/pine.js` 붙여 넣은 파인스크립트 읽기 (＋ 추가)
 - `js/chart.js` 신호 차트 (Lightweight Charts)
-- `js/app.js` 화면 동작, 자동 가정, OCR, Claude API, 엑셀 내보내기
+- `js/app/` 화면 동작 (기능별 파일, index.html 에 적힌 순서대로 불러옴. 모두 같은 이름 공간을 씀)
+  - `core.js` 저장 상태·기본 가정·P/E·표시 형식·도우미 (`$`, `esc` …)
+  - `dcf-lookup.js` 티커 자동 입력 · `dcf-result.js` 적정가·표 · `dcf-pdf.js` 재무제표 PDF · `dcf-capture.js` 캡처 OCR·Claude API · `dcf-excel.js` 엑셀 내보내기
+  - `signals.js` 신호 계산·가상 매매·성적·일봉 받기 · `signal-bar.js` 신호·성적 줄 · `signal-info.js` 신호 설명·자세히
+  - `sltp-tools.js` 손절·익절 찾기·여러 종목 풀기·최적 자동 적용
+  - `chart-view.js` 차트 창·탭·옵션·심층 분석·자동 갱신 · `kis-holdings.js` 한투 잔고·관심종목 목록 그리기 · `watchlist.js` 목록 조작(추가·순서·넓이)
+  - `sync-kakao.js` 자동 동기화·카톡 알림 · `custom-items.js` 파인스크립트 추가·가리기·삭제 · `main.js` 첫 화면 (맨 마지막)
 
 입력값은 브라우저(localStorage)에만 저장됩니다. 자동 조회는 Vercel 배포에서만 동작하고, GitHub Pages 같은 정적 호스팅에서는 직접 입력하면 됩니다.
