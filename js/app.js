@@ -569,13 +569,19 @@
   };
   const activeInds = () => INDS.filter(i => !indOff.includes(i.id));
   let pickRates = {}; // 지금 종목의 전략별 승률 (신호 버튼에 표시)
+  // 신호 줄 접기: 접으면 고른 신호 하나 + '다른 신호 N개 ▾'만. 이 브라우저에 기억 (기본 접힘)
+  let sigFold = lsGet('dcf-sig-fold', true) !== false;
   function renderPickers() {
     activeStrats();
+    const fold = sigFold && STRATS.length > 1;
     $$('.strat-pick').forEach(box => {
-      box.innerHTML = STRATS.map(s => {
+      box.innerHTML = (fold ? STRATS.filter(s => s.id === stratSel) : STRATS).map(s => {
         const st = pickRates[s.id];
         return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
-      }).join('') + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button><button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">가리기·삭제</button>';
+      }).join('')
+        + (STRATS.length > 1 ? `<button type="button" class="chip more" data-sig-fold title="${fold ? '모든 신호와 승률을 펼쳐 봅니다' : '고른 신호 하나만 남기고 줄입니다'}">${fold ? `다른 신호 ${STRATS.length - 1}개 ▾` : '접기 ▴'}</button>` : '')
+        + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button>'
+        + (fold ? '' : '<button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">가리기·삭제</button>');
     });
     $$('.ind-pick').forEach(box => {
       box.innerHTML = INDS.map(i => `<button type="button" class="chip ${indOff.includes(i.id) ? '' : 'on'}" data-iid="${esc(i.id)}" style="--c:${i.color || '#787B86'}"><i></i>${esc(i.name)}</button>`).join('') +
@@ -864,6 +870,7 @@
     if (add) { openAdd(add.dataset.addKind); return; }
     const del = e.target.closest('.chip.del');
     if (del) { openDel(del.dataset.delKind); return; }
+    if (e.target.closest('.chip[data-sig-fold]')) { sigFold = !sigFold; lsSet('dcf-sig-fold', sigFold); renderPickers(); return; }
     if (e.target.closest('.chip[data-about]')) {
       // 한 번 누르면 열고, 다시 누르면 닫아 차트를 크게 돌려놓는다
       const info = $('#modal-info');
@@ -875,6 +882,7 @@
       if (b.dataset.sid === stratSel) return;
       stratSel = baseSel = b.dataset.sid;
       lsSet('dcf-strategy-id', stratSel);
+      if (!sigFold) { sigFold = true; lsSet('dcf-sig-fold', true); }
       searchRefresh(); // 열려 있으면 새 신호로 다시 계산
     } else if (ib) {
       const id = ib.dataset.iid;
