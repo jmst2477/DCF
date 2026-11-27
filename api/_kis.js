@@ -124,6 +124,15 @@ export function makeKis({ fetchImpl = fetch, store, cfg = kisConfig() } = {}) {
       const o = j.output || {};
       return { no: o.OVRS_RSVN_ODNO || o.ODNO || "", rcit: o.RSVN_ORD_RCIT_DT || "", msg: j.msg1 || "" };
     },
+    // 장중 지정가 주문 (미국). 갈아타기에서 매도가 체결된 뒤 매수할 때 씀
+    async order(side, exch, t, qty, price) {
+      const { j } = await call("POST", "/uapi/overseas-stock/v1/trading/order", side === "buy" ? "TTTT1002U" : "TTTT1006U", {
+        ...acct(), OVRS_EXCG_CD: exch, PDNO: t, ORD_QTY: String(qty), OVRS_ORD_UNPR: Number(price).toFixed(2), CTAC_TLNO: "", MGCO_APTM_ODNO: "",
+        SLL_TYPE: side === "buy" ? "" : "00", ORD_SVR_DVSN_CD: "0", ORD_DVSN: "00",
+      });
+      const o = j.output || {};
+      return { no: o.ODNO || "", msg: j.msg1 || "" };
+    },
     // 예약 주문 목록 (접수일 기준, 한국 날짜 YYYYMMDD). 거부·미처리 이유도 같이 온다
     async resvList(from, to) {
       const out = [];

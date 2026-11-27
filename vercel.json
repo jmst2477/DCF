@@ -23,6 +23,18 @@
       "schedule": "30 23 * * 1-5"
     },
     {
+      "path": "/api/agent?action=cron&step=swap",
+      "schedule": "0 15 * * 1-5"
+    },
+    {
+      "path": "/api/agent?action=cron&step=krswap",
+      "schedule": "10 0 * * 1-5"
+    },
+    {
+      "path": "/api/agent?action=cron&step=krswap",
+      "schedule": "0 5 * * 1-5"
+    },
+    {
       "path": "/api/agent?action=cron&step=open",
       "schedule": "0 2 * * 1-5"
     },

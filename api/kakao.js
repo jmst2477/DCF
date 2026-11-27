@@ -166,6 +166,9 @@ async function runReport(manual = false) {
   const s = await jget(K.data);
   const data = (s && s.data) || {};
   const r = await makeReport({ bars: (t, range) => dailyBars(t, range), fred, profile: summary, strategies, plan, TA: libs().TA, options: optDeps() }, { data, pos: { ...((await jget("agent:pos")) || {}), ...((await jget("agent:kr:pos")) || {}) } });
+  // 에이전트 갈아타기 점수에 쓰는 섹터 순위 (3개월 S&P 대비 강한 순) + 내 종목의 섹터
+  await redis("SET", "dcf:sectors", JSON.stringify({ at: new Date().toISOString(), n: r.sectors.length, rank: Object.fromEntries(r.sectors.map((s, i) => [s.en, i])),
+    tick: Object.fromEntries(r.rows.filter(x => x.sec && !x.kr).map(x => [x.t, x.sec])) })).catch(() => {});
   const news = await jget(K.news);
   const fresh = news && Date.now() - Date.parse(news.at) < 30 * 3600e3;
   const dsc = await jget(K.discover);

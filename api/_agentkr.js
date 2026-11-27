@@ -53,7 +53,7 @@ export function krDeadline(now) {
 
 // deps: { store, kis, bars, plan, simulate, TA, send, now, L, autoOk, log, statTxt, sendChunks, K }  (K = 미국 쪽 공용 키: appr, paused)
 export function makeKrAgent(deps) {
-  const { store, kis, bars, plan, simulate, TA, send, L, autoOk, log, statTxt, sendChunks, K } = deps;
+  const { store, kis, bars, plan, simulate, TA, send, L, autoOk, log, statTxt, sendChunks, K, swapScore, planSwaps, scoreTxt, SWAP } = deps;
   const now = () => (deps.now ? deps.now() : new Date());
   const get = async (k, d) => (await store.get(k)) ?? d;
 
@@ -148,6 +148,14 @@ export function makeKrAgent(deps) {
     const W = Object.fromEntries(items.map(x => [x.t, x]));
     const exits = [], buys = [], errors = [];
     let date = null;
+    // 갈아타기 점수 재료 (원화 종목끼리만): 코스피 지수, 뉴스. 국내는 섹터 순위가 없어 섹터 점수는 가운데 값
+    let bench = null;
+    try { bench = await bars("^KS11"); } catch { /* 없으면 가운데 값 */ }
+    const news = await store.get("dcf:news");
+    const newsOk = news && news.tickers && now().getTime() - Date.parse(news.at) < 30 * 3600e3;
+    const newsOf = t => (newsOk ? news.tickers.find(x => x.t === t) : null);
+    const scoreOf = (t, stat, d) => swapScore({ stat, d, bench, secRank: null, secN: 0, news: newsOf(t) });
+    const holds = [];
 
     // 1) 에이전트가 가진 국내 종목: 손절·익절·청산 신호
     for (const [t, p] of Object.entries(pos)) {
@@ -166,6 +174,14 @@ export function makeKrAgent(deps) {
         else if (sig && sig.exit && sig.exit[i]) why = "청산 신호";
         if (why) exits.push({ t, qty: p.qty, price: 0, why });
         else if (tp) exits.push({ t, qty: p.qty, price: tp, why: "익절 대기" });
+        if (it && !why) {
+          try {
+            const sm = simulate(d, it.strat, rule, TA, { fee });
+            const s5 = tradeStats(d, sm, 5), s1 = tradeStats(d, sm, 1);
+            const stat = s5 ? { rate: s5.rate, n: s5.n, y1: s1 ? s1.total : null } : null;
+            holds.push({ t, qty: p.qty, close: d.close[i], since: p.since, nearTp: !!(tp && d.close[i] >= tp * SWAP.nearTp), stat, name: it.strat.name, ...scoreOf(t, stat, d) });
+          } catch { /* 점수 못 매기면 안 팖 */ }
+        }
       } catch (e) { errors.push(`${t}: ${e.message || e}`); }
     }
 
@@ -173,9 +189,6 @@ export function makeKrAgent(deps) {
     const apprAll = await get(K.appr, []);
     const appr = apprAll.filter(a => a.kr && (a.status === "pending" || a.status === "approved"));
     const ordersOpen = (await get(KK.orders, [])).filter(o => o.side === "buy" && (o.status === "sent" || o.status === "partial"));
-    const news = await store.get("dcf:news");
-    const newsOk = news && news.tickers && now().getTime() - Date.parse(news.at) < 30 * 3600e3;
-    const newsOf = t => (newsOk ? news.tickers.find(x => x.t === t) : null);
     const busy = t => pos[t] || appr.some(a => a.t === t) || ordersOpen.some(o => o.t === t);
     const taken = apprAll.filter(a => a.kr && a.sig === today && (a.status === "approved" || a.status === "sent")).length;
     for (const it of items) {
@@ -190,16 +203,16 @@ export function makeKrAgent(deps) {
           : newsBlocks(newsOf(it.t)) ? `뉴스 악재: ${newsOf(it.t).summary}` : buys.filter(b => !b.skip).length + taken >= L.maxBuys ? `국내 하루 ${L.maxBuys}건 한도` : null;
         const s5 = tradeStats(d, sim, 5), s1 = tradeStats(d, sim, 1);
         const stat = s5 ? { rate: s5.rate, n: s5.n, y1: s1 ? s1.total : null } : null;
-        buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], skip: why, stat, auto: !!it.star && autoOk(stat) });
+        buys.push({ t: it.t, sid: it.strat.id, rule: it.rule, name: it.strat.name, close: d.close[i], skip: why, stat, auto: !!it.star && autoOk(stat), sc: why ? null : scoreOf(it.t, stat, d) });
       } catch (e) { errors.push(`${it.t}: ${e.message || e}`); }
     }
-    const created = [];
-    let used = 0;
+    const created = [], cands = [];
+    let used = 0, cashFree = null;
     for (const b of buys.filter(b => !b.skip)) {
       const limit = tickDown(b.close * (1 + L.slip / 100));
       const est = Math.floor(L.buyKrw / limit);
       let bp = null;
-      try { bp = await kis.krBuyingPower(code(b.t), limit); } catch { /* 승인 때 다시 */ }
+      try { bp = await kis.krBuyingPower(code(b.t), limit); if (cashFree == null && bp && bp.cash >= 0) cashFree = Number(bp.cash); } catch { /* 승인 때 다시 */ }
       const nw = newsOf(b.t);
       const a = { id: crypto.randomBytes(6).toString("hex"), kr: true, t: b.t, sid: b.sid, rule: b.rule, name: b.name, news: nw ? `${nw.sentiment} · ${nw.summary}` : null,
         sig: today, close: b.close, limit, est, stat: b.stat, status: "pending", created: now().toISOString(), deadline: krDeadline(now()) };
@@ -209,7 +222,20 @@ export function makeKrAgent(deps) {
         if (no) a.note = `자동 매수 조건은 맞지만 ${no} → 승인 대기`;
         else { used += cost; Object.assign(a, { status: "approved", auto: true, qty, approvedAt: now().toISOString() }); }
       }
+      if (b.sc) a.score = b.sc;
+      if (a.status === "pending" && b.sc) cands.push({ a, cost: est * limit, score: b.sc.score });
       created.push(a);
+    }
+    // 원화가 모자란 매수 → 점수가 15점 이상 낮은 국내 보유 종목과 갈아타기 (달러 종목은 절대 안 팖)
+    if (cashFree != null && cands.length) {
+      planSwaps(cands, holds, Math.max(0, cashFree - used), today);
+      for (const c of cands) {
+        if (c.swap) {
+          const h = c.swap;
+          c.a.swap = { t: h.t, qty: h.qty, close: h.close, name: h.name, stat: h.stat, score: { score: h.score, sig: h.sig, flow: h.flow, news: h.news } };
+          c.a.note = `원화가 모자라 ${h.t}(${h.score}점)를 팔고 사는 갈아타기`;
+        } else if (c.short && !c.a.note) c.a.note = `원화 부족 · 바꿔 팔 국내 종목 없음 (${SWAP.gap}점 이상 낮은 보유 종목이 없음)`;
+      }
     }
     const all = (await get(K.appr, [])).map(a => (a.status === "pending" && a.deadline < now().toISOString() ? { ...a, status: "expired" } : a));
     await store.set(K.appr, all.concat(created).slice(-100));
@@ -219,7 +245,8 @@ export function makeKrAgent(deps) {
 
     const lines = notes.filter(n => n.includes("안 채워져"));
     created.filter(a => a.auto).forEach(a => lines.push(`🤖 자동 매수 ${a.t} · ${a.name}\n  ${statTxt(a.stat)}\n  지정가 ${won(a.limit)} × ${a.qty}주 → 08:00 장전(넥스트레이드) 주문, 안 되는 종목은 08:40\n  원치 않으면 에이전트 화면에서 '취소'`));
-    created.filter(a => !a.auto).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 ${won(a.limit)} × 약 ${a.est}주${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
+    created.filter(a => a.swap).forEach(a => lines.push(`🔁 갈아타기 승인 필요\n  ${a.swap.t} ${a.swap.qty}주 팔기 · ${scoreTxt(a.swap.score)}\n  → ${a.t} 사기 · ${scoreTxt(a.score)}\n  ${a.name}${a.stat ? ` · ${statTxt(a.stat)}` : ""}\n  승인하면 ${a.swap.t} 시장가 매도 → 체결되면 ${a.t} 지정가 ${won(a.limit)} 매수`));
+    created.filter(a => !a.auto && !a.swap).forEach(a => lines.push(`🟢 매수 승인 필요 ${a.t} · ${a.name}${a.stat ? `\n  ${statTxt(a.stat)}` : ""}\n  지정가 ${won(a.limit)} × 약 ${a.est}주${a.news ? `\n  뉴스: ${a.news}` : ""}${a.note ? `\n  ${a.note}` : ""}`));
     buys.filter(b => b.skip).forEach(b => lines.push(`⚪ ${b.t} 매수 신호 → 안 삼 (${b.skip})`));
     exits.filter(x => !x.price).forEach(x => lines.push(`🔴 ${x.t} ${x.qty}주 ${x.why} → 다음 장 시작에 시장가 매도`));
     if (month.stop) lines.push(`⚠ 이번 달 국내 손익 ${won(month.pnl)} — 새 국내 매수 멈춤`);
@@ -246,7 +273,7 @@ export function makeKrAgent(deps) {
     try { open = await kis.krOpen(ymd(today)); } catch { /* 모르면 해 봄 */ }
     if (open === false) return { done, later, skipped: "국내 휴장" };
     const appr = await get(K.appr, []);
-    for (const a of appr.filter(a => a.kr && a.status === "approved")) {
+    for (const a of appr.filter(a => a.kr && a.status === "approved" && !a.swap)) {
       const r = await tryNxt(a, appr);
       if (r.ok) done.push(`장전(NXT) 매수 주문 ${a.t} ${a.qty}주 지정가 ${won(a.limit)}`); else later.push(`${a.t}: ${r.why} → 08:40 장 시작에`);
     }
@@ -277,9 +304,10 @@ export function makeKrAgent(deps) {
     try { open = await kis.krOpen(ymd(today)); } catch { /* 모르면 그냥 보냄 (휴장이면 한투가 거부) */ }
     if (open === false) { await log(`🇰🇷 오늘 국내 휴장 — 주문을 다음 장으로 미룸`); return { done, errors, skipped: "국내 휴장" }; }
     const p = await get(KK.plan, null);
+    const swapT = new Set((await get(K.appr, [])).filter(a => a.kr && a.status === "approved" && a.swap).map(a => a.swap.t));
     if (p && !p.sent) {
       await store.set(KK.plan, { ...p, sent: true }); // 먼저 표시해서 두 번 보내지 않게
-      for (const x of p.exits) {
+      for (const x of p.exits.filter(x => !(swapT.has(x.t) && x.price > 0))) {
         try {
           await submit({ side: "sell", t: x.t, qty: x.qty, price: x.price, sig: p.date, why: x.why });
           done.push(`${x.price ? `익절 대기 지정가 ${won(x.price)}` : "시장가 매도"} ${x.t} ${x.qty}주 · ${x.why}`);
@@ -288,6 +316,11 @@ export function makeKrAgent(deps) {
     }
     const appr = await get(K.appr, []);
     for (const a of appr.filter(a => a.kr && a.status === "approved")) {
+      if (a.swap) {
+        try { await sellSwap(a); done.push(`갈아타기: ${a.swap.t} ${a.swap.qty}주 시장가 매도 → 체결되면 ${a.t} 지정가 ${won(a.limit)} 매수 (09:10 확인)`); }
+        catch (e) { a.status = "failed"; a.error = String(e.message || e); errors.push(`갈아타기 ${a.swap.t}→${a.t} 실패: ${a.error}`); }
+        continue;
+      }
       a.status = "sending";
       await store.set(K.appr, appr);
       try {
@@ -317,8 +350,9 @@ export function makeKrAgent(deps) {
     if (await store.get(KK.mstop)) throw new Error(`이번 달 국내 손실 한도(-${L.monthLoss}%)를 넘어 새 국내 매수를 멈췄습니다.`);
     const pos = await get(KK.pos, {});
     if (pos[a.t]) throw new Error(`${a.t} 는 이미 에이전트가 가지고 있습니다.`);
-    const sameDay = appr.filter(x => x.kr && x.sig === a.sig && ["approved", "sent", "sending"].includes(x.status)).length;
+    const sameDay = appr.filter(x => x.kr && x.sig === a.sig && ["approved", "sent", "sending", "swapping"].includes(x.status)).length;
     if (sameDay >= L.maxBuys) throw new Error(`국내 하루 매수 ${L.maxBuys}건 한도를 넘습니다.`);
+    if (a.swap) return approveSwap(a, appr, t);
     const qty = Math.floor(L.buyKrw / a.limit);
     if (qty < 1) throw new Error(`1주 가격이 ${man(L.buyKrw)}보다 비쌉니다.`);
     const cost = qty * a.limit;
@@ -341,6 +375,91 @@ export function makeKrAgent(deps) {
     return { status: a.status, qty, cost, krw: cost, kr: true, ex: a.ex || null, note: a.note || null };
   }
 
+  // ---------- 갈아타기 (원화 종목끼리) ----------
+  // 팔 종목에 걸린 익절 대기 주문은 빼고 취소 (같은 주식을 두 번 팔 수 없음)
+  async function dropExits(t) {
+    const p = await get(KK.plan, null);
+    if (p && !p.sent && p.exits.some(x => x.t === t)) await store.set(KK.plan, { ...p, exits: p.exits.filter(x => x.t !== t) });
+    const orders = await get(KK.orders, []);
+    let ch = false;
+    for (const o of orders.filter(o => o.t === t && o.side === "sell" && o.no && (o.status === "sent" || o.status === "partial") && !(o.filled > 0))) {
+      try { await kis.krCancel(o.org, o.no, o.ex || "KRX"); o.status = "canceled"; ch = true; }
+      catch (e) { throw new Error(`${t} 에 걸린 매도 주문을 취소하지 못했습니다: ${e.message || e}`); }
+    }
+    if (ch) await store.set(KK.orders, orders);
+  }
+  async function sellSwap(a) {
+    await dropExits(a.swap.t);
+    await submit({ side: "sell", t: a.swap.t, qty: a.swap.qty, price: 0, sig: a.sig, why: `갈아타기 → ${a.t}`, swapId: a.id });
+    a.status = "swapping"; a.swapAt = now().toISOString();
+  }
+  // 매도가 체결됐으면 판 원화로 매수 주문. { done } / { wait } / { fail }
+  async function swapBuy(a) {
+    await reconcile();
+    const orders = await get(KK.orders, []), pos = await get(KK.pos, {});
+    const o = orders.filter(x => x.swapId === a.id && x.side === "sell").pop();
+    const sold = o && (o.status === "filled" || ((o.filled || 0) > 0 && !pos[a.swap.t]));
+    if (!sold) {
+      if (!o || ["canceled", "expired", "rejected"].includes(o.status)) return { fail: `${a.swap.t} 매도가 안 돼서 ${a.t} 는 안 샀습니다` };
+      return { wait: true };
+    }
+    const bp = await kis.krBuyingPower(code(a.t), a.limit);
+    const qty = Math.min(a.qty || 0, Math.floor(Number(bp.cash) / a.limit));
+    if (qty < 1) return { fail: `${a.swap.t}는 팔렸지만 주문 가능 원화가 ${won(Number(bp.cash) || 0)}라 ${a.t}를 못 샀습니다` };
+    await submit({ side: "buy", t: a.t, qty, price: a.limit, sig: a.sig, sid: a.sid, rule: a.rule, why: `갈아타기 (${a.swap.t} 판 돈)` });
+    a.qty = qty; a.status = "sent";
+    return { done: `갈아타기: ${a.swap.t} 매도 체결 → ${a.t} ${qty}주 지정가 ${won(a.limit)} 매수 주문 (오늘만 유효)` };
+  }
+  async function approveSwap(a, appr, t) {
+    const pos = await get(KK.pos, {}), h = pos[a.swap.t];
+    if (!h || !(h.qty >= 1)) throw new Error(`${a.swap.t} 를 에이전트가 더는 갖고 있지 않아 갈아타기를 할 수 없습니다.`);
+    if (appr.some(x => x !== a && x.kr && x.swap && x.swap.t === a.swap.t && ["approved", "swapping"].includes(x.status))) throw new Error(`${a.swap.t} 는 이미 다른 갈아타기로 팔기로 했습니다.`);
+    const qty = Math.floor(L.buyKrw / a.limit);
+    if (qty < 1) throw new Error(`1주 가격이 ${man(L.buyKrw)}보다 비쌉니다.`);
+    const cost = qty * a.limit, proceeds = h.qty * a.swap.close * 0.97;
+    const bp = await kis.krBuyingPower(code(a.t), a.limit);
+    if (cost > Number(bp.cash) + proceeds) throw new Error(`${a.swap.t}를 팔아도 원화가 모자랍니다 (필요 ${won(cost)}, 지금 ${won(Number(bp.cash))} + 판 돈 약 ${won(proceeds)}).`);
+    a.qty = qty; a.approvedAt = t.toISOString(); a.swap.qty = h.qty;
+    let open = krWindow(t) === "open";
+    if (open) { try { if ((await kis.krOpen(ymd(kstDate(t)))) === false) open = false; } catch { /* 모르면 보냄 */ } }
+    let msg = `갈아타기 승인: ${a.swap.t} ${h.qty}주를 시장가로 팔고, 체결되면 ${a.t} ${qty}주를 지정가 ${won(a.limit)}에 삽니다 (약 ${man(cost)}).`;
+    if (open) {
+      await sellSwap(a);
+      await store.set(K.appr, appr);
+      await new Promise(r => setTimeout(r, deps.swapWaitMs ?? 2500)); // 장중 시장가는 바로 체결됨
+      const r = await swapBuy(a);
+      if (r.done) msg += " 매도가 체결돼서 매수 주문도 보냈습니다.";
+      else if (r.fail) { a.status = "failed"; a.error = r.fail; msg += " " + r.fail; }
+      else msg += " 매도 체결을 확인하면 (14:00 확인 때) 삽니다.";
+    } else { a.status = "approved"; a.note = "다음 장 08:40 동시호가에 매도, 체결되면 09:10 에 매수"; msg += " " + a.note; }
+    await store.set(K.appr, appr);
+    await log("🇰🇷 " + msg);
+    return { status: a.status, qty, cost, krw: cost, kr: true, note: a.note || null, msg };
+  }
+  // 한국 09:10 · 14:00 (Vercel Cron): 갈아타기 매도가 체결됐으면 매수
+  async function swapStep({ origin } = {}) {
+    const appr = await get(K.appr, []);
+    const list = appr.filter(a => a.kr && a.status === "swapping");
+    if (!list.length) return { skipped: "갈아타기 없음", done: [], errors: [] };
+    const done = [], errors = [];
+    for (const a of list) {
+      try {
+        const r = await swapBuy(a);
+        if (r.done) done.push(r.done);
+        else if (r.fail || now().getTime() - Date.parse(a.swapAt || a.approvedAt) > 20 * 3600e3) {
+          a.status = "failed"; a.error = r.fail || `${a.swap.t} 매도가 하루 안에 안 채워져서 ${a.t} 매수는 그만둠`; errors.push(a.error);
+        }
+      } catch (e) { a.status = "failed"; a.error = String(e.message || e); errors.push(`갈아타기 ${a.swap.t}→${a.t}: ${a.error}`); }
+    }
+    const fresh = await get(K.appr, []); // reconcile 이 바꾼 것 위에 갈아타기 상태만 덮어씀
+    list.forEach(a => { const i = fresh.findIndex(x => x.id === a.id); if (i >= 0) fresh[i] = a; });
+    await store.set(K.appr, fresh);
+    const msgs = done.concat(errors.map(e => "⚠ " + e));
+    if (msgs.length && send) await sendChunks(send, `🇰🇷 🔁 에이전트 국내 갈아타기`, msgs, "", origin);
+    for (const m of msgs) await log("🇰🇷 " + m);
+    return { done, errors };
+  }
+
   // 에이전트가 넣은 국내 주문 취소
   async function cancel(no) {
     const orders = await get(KK.orders, []);
@@ -352,6 +471,10 @@ export function makeKrAgent(deps) {
     if (o.side === "buy") {
       const appr = await get(K.appr, []);
       appr.forEach(a => { if (a.kr && a.t === o.t && a.sig === o.sig && a.status === "sent") a.status = "canceled"; });
+      await store.set(K.appr, appr);
+    } else if (o.swapId) {
+      const appr = await get(K.appr, []);
+      appr.forEach(a => { if (a.id === o.swapId && a.status === "swapping") { a.status = "canceled"; a.note = `${o.t} 매도를 취소해서 갈아타기도 취소`; } });
       await store.set(K.appr, appr);
     }
     await log(`🇰🇷 ${o.t} ${o.side === "buy" ? "매수" : "매도"} 주문 취소`);
@@ -365,5 +488,5 @@ export function makeKrAgent(deps) {
     };
   }
 
-  return { closeStep, openStep, nxtStep, approve, cancel, status, reconcile };
+  return { closeStep, openStep, nxtStep, swapStep, approve, cancel, status, reconcile };
 }
