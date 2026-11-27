@@ -580,7 +580,6 @@
         return `<button type="button" class="chip ${s.id === stratSel ? 'on' : ''}" data-sid="${esc(s.id)}" title="${esc(s.desc || '')}" style="--c:${s.color}"><i></i>${esc(s.name)}${st !== undefined ? `<span class="chip-rate">${rateTxt(st)}</span>` : ''}</button>`;
       }).join('')
         + (STRATS.length > 1 ? `<button type="button" class="chip more" data-sig-fold title="${fold ? '모든 신호와 승률을 펼쳐 봅니다' : '고른 신호 하나만 남기고 줄입니다'}">${fold ? `다른 신호 ${STRATS.length - 1}개 ▾` : '접기 ▴'}</button>` : '')
-        + '<button type="button" class="chip info" data-about>ⓘ 신호 설명</button>'
         + (fold ? '' : '<button type="button" class="chip add" data-add-kind="strategy">＋ 신호 추가</button><button type="button" class="chip del" data-del-kind="strategy">가리기·삭제</button>');
     });
     $$('.ind-pick').forEach(box => {
@@ -863,19 +862,20 @@
     btChanged(); // 결과 칸은 열린 채로 '지금 설정'이 바뀐 걸 다시 보여 줌
   });
   // "ⓘ 신호 설명" 버튼은 아래 설명 칸이 열려 있을 때 눌린 모양으로 (칸 제목을 눌러 닫아도 같이 바뀜)
-  const syncAbout = () => $$('.chip[data-about]').forEach(c => c.classList.toggle('on', !!$('#modal-info')?.open));
-  $('#modal-info')?.addEventListener('toggle', syncAbout);
+  // 위쪽 버튼(신호 자세히·옵션·심층 분석): 열려 있는 창의 버튼을 눌린 모양으로
+  const syncAbout = () => $$('[data-pop]').forEach(c => c.classList.toggle('on', !!document.getElementById(c.dataset.pop)?.open));
+  $$('.modal-info.popup').forEach(d => d.addEventListener('toggle', syncAbout));
   document.addEventListener('click', e => {
     const b = e.target.closest('.strat-pick .chip[data-sid]'), ib = e.target.closest('.ind-pick .chip[data-iid]'), add = e.target.closest('.chip.add');
     if (add) { openAdd(add.dataset.addKind); return; }
     const del = e.target.closest('.chip.del');
     if (del) { openDel(del.dataset.delKind); return; }
     if (e.target.closest('.chip[data-sig-fold]')) { sigFold = !sigFold; lsSet('dcf-sig-fold', sigFold); renderPickers(); return; }
-    if (e.target.closest('.chip[data-about]')) {
-      // 한 번 누르면 열고, 다시 누르면 닫아 차트를 크게 돌려놓는다
-      const info = $('#modal-info');
-      info.open = !info.open;
-      if (info.open) setTimeout(() => { const a = $('#sig-about'); if (a) a.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
+    const pop = e.target.closest('[data-pop]');
+    if (pop) {
+      // 한 번 누르면 창을 열고, 다시 누르면 닫는다
+      const d = document.getElementById(pop.dataset.pop);
+      if (d) d.open = !d.open;
       return;
     }
     if (b) {
@@ -1780,7 +1780,7 @@
   }));
   document.addEventListener('pointerdown', e => {
     const o = $('.modal-info.popup[open]');
-    if (o && !o.contains(e.target) && !e.target.closest('.add-panel, .chip[data-about]')) o.open = false;
+    if (o && !o.contains(e.target) && !e.target.closest('.add-panel, [data-pop]')) o.open = false;
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') { const o = $('.modal-info.popup[open]'); if (o) o.open = false; } });
   // 🔬 심층 분석 보고서: 요청하면 서버가 Claude 에 맡기고 /d/<id> 주소를 돌려준다. 이 브라우저에 종목별로 지난 보고서 주소를 기억
